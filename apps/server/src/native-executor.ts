@@ -94,7 +94,15 @@ export const NATIVE_PLAN_TOOL_NAMES = [
   "memory_read",
   "memory_search",
   "ask_user",
-  "submit_plan"
+  "submit_plan",
+  "agent",
+  "agent_status",
+  "agent_wait",
+  "agent_kill",
+  "agent_cancel",
+  "agent_resume",
+  "agent_send",
+  "delegate_task"
 ] as const;
 
 const CODING_SECTION_LABELS: Record<string, string> = {
@@ -273,6 +281,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   if (options.mode === "plan") {
     permissions.tools = [...NATIVE_PLAN_TOOL_NAMES];
   }
+  const planMode = options.mode === "plan";
+  const planToolNames = new Set<string>(NATIVE_PLAN_TOOL_NAMES);
   const sandbox = fullPermission ? undefined : await prepareNativeSandbox(options, permissions);
 
   const drafting = !coding && isTextDraftTask({ ...options.task, expectedOutputs: options.expectedOutputs });
@@ -281,6 +291,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     !options.skipBuiltinGoalTools || !["get_goal", "create_goal", "update_goal"].includes(tool.definition.name)
   );
   const toolsForRun = dedupeTools([...builtinTools, ...(options.extraTools ?? [])])
+    .filter((tool) => !planMode || planToolNames.has(tool.definition.name))
     .filter((tool) => !directRead || ["read_file", "read_desktop_file", "read_document", "finish_task"].includes(tool.definition.name))
     .filter((tool) => !drafting || draftTools.has(tool.definition.name))
     .map((tool) => directRead && tool.definition.name === "read_file" ? directReadTool(tool) : tool)
@@ -294,7 +305,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       }
     });
   const availableTools = toolsForRun.map((tool) => tool.definition.name);
-  const baseDirectTools = (options.mode ?? "build") === "plan"
+  const baseDirectTools = planMode
     ? [...NATIVE_PLAN_TOOL_NAMES]
     : taskProfile.directTools;
   const delegationTools = (options.extraTools ?? [])

@@ -75,9 +75,12 @@ describe("native tool assembly", () => {
     expect(base.tools).not.toContain("submit_plan");
   });
 
-  it("exposes only read-only and submit_plan tools in native planning mode", () => {
+  it("exposes only read-only investigation, optional read-only team control, and submit_plan in native planning mode", () => {
     expect(NATIVE_PLAN_TOOL_NAMES).toContain("read_file");
     expect(NATIVE_PLAN_TOOL_NAMES).toContain("submit_plan");
+    for (const tool of ["agent", "agent_wait", "agent_status"]) {
+      expect(NATIVE_PLAN_TOOL_NAMES).toContain(tool);
+    }
     for (const tool of ["write_file", "edit_file", "apply_patch", "finish_task", "run_tests"]) {
       expect(NATIVE_PLAN_TOOL_NAMES).not.toContain(tool);
     }

@@ -32,6 +32,7 @@ export function normalizePlan(plan: PlanRecord): PlanRecord {
     projectId: plan.projectId ?? null,
     planningTaskId: plan.planningTaskId ?? null,
     executionTaskId: plan.executionTaskId ?? null,
+    ...(plan.planningExecutorId ? { planningExecutorId: plan.planningExecutorId } : {}),
     ...(plan.execution ? { execution: plan.execution } : {}),
     planMarkdown: plan.planMarkdown ?? null,
     planPath: plan.planPath ?? null,

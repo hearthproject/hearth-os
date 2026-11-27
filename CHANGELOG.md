@@ -5,7 +5,7 @@
 ### 团队模式改为执行器原生能力
 
 - “单 Agent / 团队”开关不再只对 Native 生效：Hearth 编排只读成员，Codex 使用原生 multi-agent，DSH 使用原生 Team；界面按负责人显示“Hearth 编排 / Codex 原生 / DSH 原生”。
-- 计划模式强制单 Agent（`forcedBy: "plan"`），不再出现“有团队策略但没有委派工具”的坏组合。
+- 计划模式保留所选团队：规划阶段仍只读，Hearth 注入只读成员、Codex 使用只读原生多 Agent、DSH 使用只读原生 Team，不再强制降级为单 Agent。
 - 执行器能力不足时自动降级为单 Agent，并保留 `degraded` 与 `reason`，不再用提示词假装团队已生效。
 
 ### Codex 原生多 Agent

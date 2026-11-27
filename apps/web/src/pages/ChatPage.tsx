@@ -1120,7 +1120,7 @@ export function ChatPage() {
     await dispatch(outgoing);
   }
 
-  async function runPlanAction(action: PlanActionName, options: { note?: string; planMarkdown?: string } = {}): Promise<void> {
+  async function runPlanAction(action: PlanActionName, options: { note?: string; planMarkdown?: string; executorId?: ExecutorId } = {}): Promise<void> {
     const view = currentPlan;
     if (!view || planBusy) return;
     setPlanBusy(true);
@@ -1129,7 +1129,8 @@ export function ChatPage() {
       await api.planAction(view.id, action, {
         expectedRevision: view.revision,
         ...(options.note ? { note: options.note } : {}),
-        ...(options.planMarkdown !== undefined ? { planMarkdown: options.planMarkdown } : {})
+        ...(options.planMarkdown !== undefined ? { planMarkdown: options.planMarkdown } : {}),
+        ...(options.executorId ? { executorId: options.executorId } : {})
       });
       if (action === "approve" || action === "cancel") await persistBuildMode();
       await queryClient.invalidateQueries({ queryKey: ["plans", conversationId] });
@@ -2936,6 +2937,7 @@ export function ChatPage() {
       />
       <PlanDialog
         view={planDialogOpen ? currentPlan : null}
+        executors={executorViews}
         busy={planBusy}
         onClose={() => setPlanDialogOpen(false)}
         onAction={(action, options) => void runPlanAction(action, options)}

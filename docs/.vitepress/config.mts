@@ -213,6 +213,7 @@ const zhSidebar = {
         { text: '评测 Agent（独立）', link: 'https://hearthproject.github.io/hearth-eval/' },
         { text: '风险与停止条件', link: '/reference/risks' },
         { text: '关键决策', link: '/reference/decisions' },
+        { text: '混合模式与执行器矩阵', link: '/reference/mixed-modes' },
         { text: '自研与集成', link: '/reference/build-vs-integrate' },
         { text: '术语表', link: '/reference/glossary' },
         { text: '默认清单', link: '/reference/checklists' },

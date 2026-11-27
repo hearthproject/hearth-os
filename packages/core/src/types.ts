@@ -646,6 +646,8 @@ export interface PlanRecord {
   stage: PlanStage;
   planningTaskId: string | null;
   executionTaskId: string | null;
+  /** Executor that ran the read-only planning phase. Defaults to execution.executorId. */
+  planningExecutorId?: ExecutorId | null;
   execution?: PlanExecutionProfile;
   planMarkdown: string | null;
   planPath: string | null;

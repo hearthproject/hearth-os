@@ -284,7 +284,7 @@ CREATE TABLE IF NOT EXISTS goal_completion_reports (
 CREATE TABLE IF NOT EXISTS plans (
   id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, project_id TEXT,
   title TEXT NOT NULL, objective TEXT NOT NULL, stage TEXT NOT NULL,
-  planning_task_id TEXT, execution_task_id TEXT,
+  planning_task_id TEXT, execution_task_id TEXT, planning_executor_id TEXT,
   plan_markdown TEXT, plan_path TEXT, revision INTEGER NOT NULL DEFAULT 0,
   plan_sha256 TEXT, planning_attempt INTEGER NOT NULL DEFAULT 0,
   planning_run_id TEXT, execution_json TEXT,
@@ -1872,10 +1872,11 @@ export class HearthStore {
     ensureColumn(this.db, "plans", "plan_sha256", "TEXT");
     ensureColumn(this.db, "plans", "planning_attempt", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn(this.db, "plans", "planning_run_id", "TEXT");
+    ensureColumn(this.db, "plans", "planning_executor_id", "TEXT");
     this.db.exec(`CREATE TABLE IF NOT EXISTS plans (
       id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, project_id TEXT,
       title TEXT NOT NULL, objective TEXT NOT NULL, stage TEXT NOT NULL,
-      planning_task_id TEXT, execution_task_id TEXT,
+      planning_task_id TEXT, execution_task_id TEXT, planning_executor_id TEXT,
       plan_markdown TEXT, plan_path TEXT, revision INTEGER NOT NULL DEFAULT 0,
       execution_json TEXT,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -4615,12 +4616,13 @@ function upsertGoal(db: DatabaseSync, goal: GoalContract): void {
 
 function upsertPlanRow(db: DatabaseSync, plan: PlanRecord): void {
   db.prepare(
-    `INSERT INTO plans (id, conversation_id, project_id, title, objective, stage, planning_task_id, execution_task_id, plan_markdown, plan_path, plan_sha256, planning_attempt, planning_run_id, revision, execution_json, created_at, updated_at, approved_at, completed_at, error)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO plans (id, conversation_id, project_id, title, objective, stage, planning_task_id, execution_task_id, planning_executor_id, plan_markdown, plan_path, plan_sha256, planning_attempt, planning_run_id, revision, execution_json, created_at, updated_at, approved_at, completed_at, error)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        conversation_id=excluded.conversation_id, project_id=excluded.project_id,
        title=excluded.title, objective=excluded.objective, stage=excluded.stage,
        planning_task_id=excluded.planning_task_id, execution_task_id=excluded.execution_task_id,
+       planning_executor_id=excluded.planning_executor_id,
        plan_markdown=excluded.plan_markdown, plan_path=excluded.plan_path,
        plan_sha256=excluded.plan_sha256, planning_attempt=excluded.planning_attempt,
        planning_run_id=excluded.planning_run_id,
@@ -4629,7 +4631,7 @@ function upsertPlanRow(db: DatabaseSync, plan: PlanRecord): void {
        approved_at=excluded.approved_at, completed_at=excluded.completed_at, error=excluded.error`
   ).run(
     plan.id, plan.conversationId, plan.projectId ?? null, plan.title, plan.objective, plan.stage,
-    plan.planningTaskId ?? null, plan.executionTaskId ?? null,
+    plan.planningTaskId ?? null, plan.executionTaskId ?? null, plan.planningExecutorId ?? null,
     plan.planMarkdown ?? null, plan.planPath ?? null, plan.planSha256 ?? null,
     plan.planningAttempt ?? 0, plan.planningRunId ?? null, plan.revision ?? 0,
     plan.execution ? JSON.stringify(plan.execution) : null,
@@ -5739,6 +5741,7 @@ function rowToPlan(row: DbRow): PlanRecord {
     stage: String(row.stage) as PlanRecord["stage"],
     planningTaskId: row.planning_task_id == null ? null : String(row.planning_task_id),
     executionTaskId: row.execution_task_id == null ? null : String(row.execution_task_id),
+    ...(row.planning_executor_id == null ? {} : { planningExecutorId: String(row.planning_executor_id) as NonNullable<PlanRecord["planningExecutorId"]> }),
     planMarkdown: row.plan_markdown == null ? null : String(row.plan_markdown),
     planPath: row.plan_path == null ? null : String(row.plan_path),
     planSha256: row.plan_sha256 == null ? null : String(row.plan_sha256),

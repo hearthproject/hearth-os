@@ -516,6 +516,32 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
 
     const userContent = message || (detectedUrl ? `请处理这个网址：${detectedUrl}` : `请处理附件：${storedFiles.map((file) => file.name).join("、")}`);
+    const effectiveSettings = parsed.data.settings
+      ? mergeConversationSettings(conversation.settings, parsed.data.settings)
+      : conversation.settings;
+    const wantsGoal = parsed.data.goalMode === true;
+    // `collaborationMode` is sticky after a plan starts. An explicit Goal request
+    // must not inherit that sticky plan intent, or an active plan would be
+    // misreported as a same-turn MODE_CONFLICT instead of GOAL_PLAN_CONFLICT.
+    const wantsPlan = parsed.data.planMode === true || (!wantsGoal && effectiveSettings.collaborationMode === "plan");
+    if (wantsPlan && wantsGoal) {
+      return reply.code(409).send({
+        error: "MODE_CONFLICT",
+        message: "计划和目标不能同时开启：请先退出一个模式再发送"
+      });
+    }
+    if (wantsGoal && options.plans?.activeForConversation(conversation.id)) {
+      return reply.code(409).send({
+        error: "GOAL_PLAN_CONFLICT",
+        message: "当前会话还有未结束的计划，请先批准或退出计划再开始目标"
+      });
+    }
+    if (wantsPlan && options.goals?.findOpenForConversation(conversation.id)) {
+      return reply.code(409).send({
+        error: "PLAN_GOAL_CONFLICT",
+        message: "当前会话还有未结束的目标，请先结束目标再开始计划"
+      });
+    }
     const titleWasPlaceholder = conversation.title === "新对话";
     const userRecord = store.createChatMessage({
       id: randomUUID(),
@@ -581,9 +607,6 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
 
     const plan = planExecution(userContent);
-    const effectiveSettings = parsed.data.settings
-      ? mergeConversationSettings(conversation.settings, parsed.data.settings)
-      : conversation.settings;
     const lockedExecutorId = executorSettings().preferredExecutorId ?? "native";
     const preferredExecutorId = lockedExecutorId;
     const executorEnabled = { ...effectiveSettings.executorEnabled, [lockedExecutorId]: true };
@@ -610,8 +633,6 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         return reply;
       }
     }
-    const wantsGoal = parsed.data.goalMode === true;
-    const wantsPlan = parsed.data.planMode === true || effectiveSettings.collaborationMode === "plan";
     const available = executorAvailability();
     const lockedHealth = options.executorHealth
       ? options.executorHealth(lockedExecutorId)
@@ -866,6 +887,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
             objective: taskGoal,
             textInput: harnessPrompt,
             ...(pendingMcpServerIds.length ? { mcpServerIds: pendingMcpServerIds } : {}),
+            planningExecutorId: resolution.executorId,
             execution: {
               executorId: resolution.executorId,
               taskKind: plan.taskKind,

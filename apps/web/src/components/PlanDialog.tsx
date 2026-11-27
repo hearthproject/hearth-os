@@ -3,6 +3,7 @@ import { Check, ClipboardList, Loader2, Pencil, Plus, Send, Trash2, X } from "lu
 import type { PlanActionName, PlanView } from "@hearth/core";
 import { Markdown } from "./Markdown.tsx";
 import { executorLabel } from "../lib/labels.ts";
+import type { ExecutorId, ExecutorView } from "../lib/types.ts";
 import {
   appendPlanBlock,
   createPlanBlock,
@@ -16,20 +17,23 @@ type PlanEditorMode = "blocks" | "raw";
 
 export function PlanDialog({
   view,
+  executors,
   busy,
   onClose,
   onAction
 }: {
   view: PlanView | null;
+  executors: ExecutorView[];
   busy: boolean;
   onClose: () => void;
-  onAction: (action: PlanActionName, options?: { note?: string; planMarkdown?: string }) => void;
+  onAction: (action: PlanActionName, options?: { note?: string; planMarkdown?: string; executorId?: ExecutorId }) => void;
 }) {
   const [note, setNote] = useState("");
   const [draftPlan, setDraftPlan] = useState("");
   const [editingPlan, setEditingPlan] = useState(false);
   const [editorMode, setEditorMode] = useState<PlanEditorMode>("blocks");
   const [blocks, setBlocks] = useState<PlanBlock[]>([]);
+  const [executionExecutorId, setExecutionExecutorId] = useState<ExecutorId>("native");
   const planMarkdown = unwrapMarkdownFence(view?.planMarkdown);
   useEffect(() => {
     setNote("");
@@ -37,14 +41,22 @@ export function PlanDialog({
     setBlocks(parsePlanBlocks(planMarkdown));
     setEditingPlan(false);
     setEditorMode("blocks");
-  }, [view?.id, view?.stage, planMarkdown]);
+    setExecutionExecutorId(view?.execution?.executorId ?? "native");
+  }, [view?.id, view?.stage, planMarkdown, view?.execution?.executorId]);
   if (!view) return null;
 
   const editedMarkdown = editorMode === "raw" ? draftPlan : serializePlanBlocks(blocks);
   const currentPlan = editingPlan ? editedMarkdown : planMarkdown;
   const canApprove = view.stage === "awaiting_approval" && Boolean(currentPlan.trim());
   const canReplan = view.stage === "awaiting_approval" || view.stage === "failed";
-  const executorText = executorLabel(view.execution?.executorId);
+  const planningExecutorText = executorLabel(view.planningExecutorId ?? view.execution?.executorId);
+  const executionExecutorText = executorLabel(executionExecutorId);
+  const executorOptions = (() => {
+    const available = executors.filter((executor) => executor.health.canRun);
+    const current = executors.find((executor) => executor.id === executionExecutorId);
+    if (current && !available.some((executor) => executor.id === current.id)) return [current, ...available];
+    return available.length > 0 ? available : executors;
+  })();
   const attempt = Math.max(1, view.planningAttempt ?? 1);
   const replans = Math.max(0, attempt - 1);
 
@@ -107,12 +119,28 @@ export function PlanDialog({
           <span className="goal-dialog-mark"><ClipboardList size={16} /></span>
           <div>
             <h2>{view.title}</h2>
-            <p>{executorText} 负责只读调查，Hearth 保存方案。确认计划后再开始执行；执行前你可以直接修改计划内容。</p>
+            <p>{planningExecutorText} 负责只读调查，Hearth 保存方案。确认计划后再开始执行；执行器可以在这里换成 Codex、DSH 或 Hearth，执行前你也可以直接修改计划内容。</p>
           </div>
           <button type="button" className="icon-button" onClick={onClose} aria-label="关闭"><X size={16} /></button>
         </header>
         <div className="goal-dialog-meta">
-          <span><b>执行器</b>{executorText}</span>
+          <span><b>规划执行器</b>{planningExecutorText}</span>
+          <span>
+            <b>执行执行器</b>
+            {canApprove ? (
+              <select
+                aria-label="计划执行执行器"
+                value={executionExecutorId}
+                onChange={(event) => setExecutionExecutorId(event.target.value as ExecutorId)}
+              >
+                {executorOptions.map((executor) => (
+                  <option key={executor.id} value={executor.id}>
+                    {executor.name}{executor.health.canRun ? "" : "（当前不可运行）"}
+                  </option>
+                ))}
+              </select>
+            ) : executionExecutorText}
+          </span>
           <span><b>规划轮次</b>第 {attempt} 次</span>
           {replans > 0 ? <span><b>规划状态</b>已重规划 {replans} 次</span> : null}
           {view.planPath ? <span className="goal-dialog-meta-wide"><b>规范文件</b><code>{view.planPath}</code></span> : null}
@@ -251,7 +279,10 @@ export function PlanDialog({
               type="button"
               className="plan-dialog-action primary"
               disabled={busy}
-              onClick={() => onAction("approve", currentPlan.trim() !== planMarkdown.trim() ? { planMarkdown: currentPlan } : {})}
+              onClick={() => onAction("approve", {
+                ...(currentPlan.trim() !== planMarkdown.trim() ? { planMarkdown: currentPlan } : {}),
+                ...(executionExecutorId !== view.execution?.executorId ? { executorId: executionExecutorId } : {})
+              })}
             >
               {busy ? <Loader2 size={15} className="spin" /> : <Check size={15} />}
               <span>

@@ -1115,8 +1115,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
   registerLibraryRoutes(app, library);
   registerSkillRoutes(app, skills, library);
-  registerGoalRoutes(app, { service, goals });
-  registerPlanRoutes(app, { plans });
+  registerGoalRoutes(app, { service, goals, plans });
+  registerPlanRoutes(app, { plans, goals });
   registerApprovalGrantRoutes(app, approvals.grants);
   registerEvidenceRoutes(app, {
     service,

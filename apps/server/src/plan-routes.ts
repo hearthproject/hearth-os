@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import { EXECUTOR_IDS, PlanStateError, TASK_KINDS } from "@hearth/core";
+import type { GoalService } from "./goals.ts";
 import type { PlanService } from "./plans.ts";
 
 const executionSchema = z.object({
@@ -18,6 +19,7 @@ const createPlanSchema = z.object({
   title: z.string().trim().min(1).max(200).optional(),
   objective: z.string().trim().min(1).max(20_000),
   textInput: z.string().max(100_000).optional(),
+  planningExecutorId: z.enum(EXECUTOR_IDS).optional(),
   execution: executionSchema.optional(),
   start: z.boolean().optional()
 }).strict();
@@ -26,14 +28,15 @@ const actionSchema = z.object({
   action: z.enum(["approve", "replan", "cancel", "retry"]),
   expectedRevision: z.number().int().min(0).optional(),
   note: z.string().trim().max(4_000).optional(),
-  planMarkdown: z.string().max(200_000).optional()
+  planMarkdown: z.string().max(200_000).optional(),
+  executorId: z.enum(EXECUTOR_IDS).optional()
 }).strict();
 
 export function registerPlanRoutes(
   app: FastifyInstance,
-  options: { plans: PlanService }
+  options: { plans: PlanService; goals?: GoalService }
 ): void {
-  const { plans } = options;
+  const { plans, goals } = options;
 
   app.get("/api/plans", async (request, reply) => {
     const query = request.query as Record<string, unknown>;
@@ -56,6 +59,12 @@ export function registerPlanRoutes(
     }
     const body = parsed.data;
     try {
+      if (goals?.findOpenForConversation(body.conversationId)) {
+        return reply.code(409).send({
+          error: "PLAN_GOAL_CONFLICT",
+          message: "当前会话还有未结束的目标，请先结束目标再开始计划"
+        });
+      }
       const execution = body.execution ? {
         executorId: body.execution.executorId,
         taskKind: body.execution.taskKind,
@@ -70,6 +79,7 @@ export function registerPlanRoutes(
         ...(body.title ? { title: body.title } : {}),
         objective: body.objective,
         ...(body.textInput ? { textInput: body.textInput } : {}),
+        ...(body.planningExecutorId ? { planningExecutorId: body.planningExecutorId } : {}),
         ...(execution ? { execution } : {}),
         ...(body.start !== undefined ? { start: body.start } : {})
       });
@@ -96,7 +106,8 @@ export function registerPlanRoutes(
       const plan = await plans.action(id, parsed.data.action, {
         ...(parsed.data.expectedRevision !== undefined ? { expectedRevision: parsed.data.expectedRevision } : {}),
         ...(parsed.data.note ? { note: parsed.data.note } : {}),
-        ...(parsed.data.planMarkdown !== undefined ? { planMarkdown: parsed.data.planMarkdown } : {})
+        ...(parsed.data.planMarkdown !== undefined ? { planMarkdown: parsed.data.planMarkdown } : {}),
+        ...(parsed.data.executorId ? { executorId: parsed.data.executorId } : {})
       });
       return reply.send(plan);
     } catch (error) {

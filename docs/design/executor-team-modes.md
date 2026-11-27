@@ -42,17 +42,16 @@ Hearth 已经有 `SubagentTaskManager`、事件日志、运行账本、审批和
 | `capability` | `available` / `unavailable` / `probe_failed` | 能力探测结果 |
 | `visibility` | `members` / `session-tree` / `none` | 成员事件可见程度 |
 
-另有 `limits`、`degraded`、`reason`、`forcedBy`。`forcedBy: "plan"` 表示计划模式强制单 Agent；`degraded: true` 表示请求未被满足。
+另有 `limits`、`degraded`、`reason`。`degraded: true` 表示请求未被满足；计划模式不再强制降级，是否组队由执行器能力决定。
 
 ### 解析顺序
 
 `resolveAgentMode(requested, executorId, { taskMode, capability })`：
 
-1. `taskMode === "plan"` → `effective: "single"`，`forcedBy: "plan"`。规划阶段只调查，不组队。
-2. 执行器能力为 `unavailable` / `probe_failed` 且请求 `team` → 降级 `single`，`degraded: true`，写入 `reason`。
-3. 其余情况按执行器映射 owner / guarantee / visibility / limits。
+1. 执行器能力为 `unavailable` / `probe_failed` 且请求 `team` → 降级 `single`，`degraded: true`，写入 `reason`。
+2. 其余情况按执行器映射 owner / guarantee / visibility / limits；`taskMode: "plan"` 只影响执行器侧的只读约束，不改变 `single` / `team` 解析结果。
 
-计划模式即使会话选了 `team`，界面也显示“计划模式固定单 Agent”，不显示成能力故障。
+计划模式保留会话选择的团队策略：Hearth 只注入只读成员工具，Codex 使用只读原生多 Agent，DSH 使用只读原生 Team；写入仍由 Lead 或批准后的执行任务完成。
 
 ## 执行器差异
 

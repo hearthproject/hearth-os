@@ -68,8 +68,6 @@ export interface AgentModeResolution {
   limits: ExecutorTeamLimits | null;
   degraded: boolean;
   reason?: string;
-  /** Set when plan mode overrode the requested Team switch. */
-  forcedBy?: "plan";
 }
 
 export interface AgentModeResolutionInput {
@@ -96,16 +94,6 @@ export function resolveAgentMode(
 
   if (mode === "single") {
     return { ...base, effective: "single", degraded: false };
-  }
-
-  if (options.taskMode === "plan") {
-    return {
-      ...base,
-      effective: "single",
-      degraded: false,
-      forcedBy: "plan",
-      reason: "计划模式固定单 Agent，团队开关不生效"
-    };
   }
 
   if (capability.state === "unavailable" || capability.state === "probe_failed") {

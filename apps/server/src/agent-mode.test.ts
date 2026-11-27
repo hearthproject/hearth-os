@@ -46,10 +46,10 @@ describe("agent mode", () => {
     expect(dsh).toMatchObject({ effective: "team", owner: "deepseek-harness", visibility: "session-tree" });
   });
 
-  it("forces single in plan mode regardless of the Team switch", () => {
+  it("keeps the Team switch active while planning", () => {
     const plan = resolveAgentMode("team", "native", { capability: hearthCapability, taskMode: "plan" });
-    expect(plan).toMatchObject({ requested: "team", effective: "single", degraded: false, forcedBy: "plan" });
-    expect(plan.reason).toContain("计划模式");
+    expect(plan).toMatchObject({ requested: "team", effective: "team", degraded: false, owner: "hearth" });
+    expect(Object.hasOwn(plan, "forcedBy")).toBe(false);
   });
 
   it("degrades instead of pretending when the executor cannot run a team", () => {

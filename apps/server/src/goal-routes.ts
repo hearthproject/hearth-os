@@ -4,6 +4,7 @@ import { GoalStateError, EXECUTOR_IDS, TASK_KINDS } from "@hearth/core";
 import type { GoalContractPatch } from "@hearth/core";
 import type { HearthService } from "./service.ts";
 import type { GoalService } from "./goals.ts";
+import type { PlanService } from "./plans.ts";
 
 const criterionSchema = z.object({
   id: z.string().trim().min(1).max(40).optional(),
@@ -99,7 +100,7 @@ const actionSchema = z.object({
 
 export function registerGoalRoutes(
   app: FastifyInstance,
-  options: { service: HearthService; goals: GoalService }
+  options: { service: HearthService; goals: GoalService; plans?: PlanService }
 ): void {
   const { service, goals } = options;
 
@@ -122,6 +123,12 @@ export function registerGoalRoutes(
       return reply.code(400).send({ error: "INVALID_GOAL", message: parsed.error.issues[0]?.message ?? "目标参数不合法" });
     }
     const body = parsed.data;
+    if (body.conversationId && options.plans?.activeForConversation(body.conversationId)) {
+      return reply.code(409).send({
+        error: "GOAL_PLAN_CONFLICT",
+        message: "当前会话还有未结束的计划，请先批准或退出计划再开始目标"
+      });
+    }
     let goalId: string | null = null;
     try {
       const created = goals.create({

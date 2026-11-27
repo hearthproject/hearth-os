@@ -33,6 +33,8 @@ export interface CreatePlanInput {
   title?: string;
   objective?: string;
   textInput?: string;
+  /** Executor used for the read-only planning task; execution may use a different executor. */
+  planningExecutorId?: ExecutorId;
   execution?: Partial<PlanExecutionProfile>;
   mcpServerIds?: string[];
   /** Create the first planning task immediately. Defaults to true when objective exists. */
@@ -98,6 +100,7 @@ export class PlanService {
       stage: "planning",
       planningTaskId: null,
       executionTaskId: null,
+      planningExecutorId: input.planningExecutorId ?? input.execution?.executorId ?? "native",
       planMarkdown: null,
       planPath: null,
       planSha256: null,
@@ -140,14 +143,14 @@ export class PlanService {
   async action(
     planId: string,
     action: PlanActionName,
-    options: { expectedRevision?: number; note?: string; planMarkdown?: string } = {}
+    options: { expectedRevision?: number; note?: string; planMarkdown?: string; executorId?: ExecutorId } = {}
   ): Promise<PlanView> {
     const plan = this.require(planId);
     assertPlanAction(plan.stage, action);
     if (options.expectedRevision !== undefined && options.expectedRevision !== plan.revision) {
       throw new PlanStateError("PLAN_REVISION_CONFLICT", "计划已被更新，请刷新后重试");
     }
-    if (action === "approve") return this.approve(plan, options.planMarkdown);
+    if (action === "approve") return this.approve(plan, options.planMarkdown, options.executorId);
     if (action === "replan") return this.replan(plan, options.note);
     if (action === "cancel") return this.cancel(plan);
     return this.retry(plan);
@@ -296,18 +299,21 @@ export class PlanService {
     }
   }
 
-  private approve(plan: PlanRecord, editedMarkdown?: string): PlanView {
+  private approve(plan: PlanRecord, editedMarkdown?: string, executorId?: ExecutorId): PlanView {
     const markdown = (editedMarkdown ?? plan.planMarkdown ?? "").trim();
     if (!markdown) throw new PlanStateError("PLAN_STATE_INVALID", "计划还没有正文，不能开始执行");
     const canonicalPath = canonicalPlanPath(this.planRoot, plan.id);
     const sha256 = this.writeCanonicalPlan(canonicalPath, markdown);
+    const baseExecution = this.executionProfile(plan);
+    const execution = executorId ? { ...baseExecution, executorId } : baseExecution;
     const approvedPlan: PlanRecord = {
       ...plan,
       planMarkdown: markdown,
       planPath: canonicalPath,
-      planSha256: sha256
+      planSha256: sha256,
+      ...(executorId ? { execution } : {}),
+      ...(plan.planningExecutorId ? {} : { planningExecutorId: baseExecution.executorId })
     };
-    const execution = this.executionProfile(plan);
     const planningTask = plan.planningTaskId ? this.service.store.getTask(plan.planningTaskId) : null;
     const task = this.service.createTask({
       title: plan.title,
@@ -422,7 +428,7 @@ export class PlanService {
       goal: plan.objective || text,
       textInput: text,
       conversationId: plan.conversationId,
-      executorId: execution.executorId,
+      executorId: plan.planningExecutorId ?? execution.executorId,
       taskKind: execution.taskKind,
       expectedOutputs: [],
       ...(plan.projectId ? { projectId: plan.projectId } : {}),

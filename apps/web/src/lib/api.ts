@@ -209,6 +209,7 @@ export const api = {
     title?: string;
     objective: string;
     textInput?: string;
+    planningExecutorId?: "native" | "codex" | "deepseek-harness";
     execution?: {
       executorId: "native" | "codex" | "deepseek-harness";
       taskKind: "delivery" | "workspace" | "general";
@@ -221,7 +222,7 @@ export const api = {
     method: "POST",
     body: JSON.stringify(body)
   }),
-  planAction: (id: string, action: PlanActionName, options: { expectedRevision?: number; note?: string; planMarkdown?: string } = {}) =>
+  planAction: (id: string, action: PlanActionName, options: { expectedRevision?: number; note?: string; planMarkdown?: string; executorId?: ExecutorId } = {}) =>
     request<PlanView>(`/api/plans/${encodeURIComponent(id)}/actions`, {
       method: "POST",
       body: JSON.stringify({ action, ...options })

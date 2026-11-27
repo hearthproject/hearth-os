@@ -1107,6 +1107,89 @@ describe("unified harness API", () => {
       node: { kind: "task", metadata: {} }
     } as unknown as LibrarySearchHit, null)).toBe(true);
   });
+
+  it("rejects plan+goal and cross-mode conflicts before writing the user message", async () => {
+    const app = await buildServer({
+      store,
+      serveWeb: false,
+      modelSettingsPath: join(root, "settings.json"),
+      attachmentRoot: join(root, "files")
+    });
+    try {
+      const conversation = store.createConversation("mode conflict");
+      const before = store.listChatMessages(conversation.id).length;
+      const both = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { conversationId: conversation.id, message: "do both", planMode: true, goalMode: true }
+      });
+      expect(both.statusCode, both.body).toBe(409);
+      expect(both.json().error).toBe("MODE_CONFLICT");
+      expect(store.listChatMessages(conversation.id)).toHaveLength(before);
+
+      const goal = await app.inject({
+        method: "POST",
+        url: "/api/goals",
+        payload: {
+          conversationId: conversation.id,
+          objective: "active goal",
+          start: false,
+          execution: { executorId: "native", taskKind: "general", expectedOutputs: [], networkHosts: [] }
+        }
+      });
+      expect(goal.statusCode, goal.body).toBe(201);
+      const planWhileGoal = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { conversationId: conversation.id, message: "plan", planMode: true }
+      });
+      expect(planWhileGoal.statusCode, planWhileGoal.body).toBe(409);
+      expect(planWhileGoal.json().error).toBe("PLAN_GOAL_CONFLICT");
+      const directPlan = await app.inject({
+        method: "POST",
+        url: "/api/plans",
+        payload: { conversationId: conversation.id, objective: "blocked plan", start: false }
+      });
+      expect(directPlan.statusCode, directPlan.body).toBe(409);
+      expect(directPlan.json().error).toBe("PLAN_GOAL_CONFLICT");
+
+      const other = store.createConversation("plan conflict");
+      const plan = await app.inject({
+        method: "POST",
+        url: "/api/plans",
+        payload: { conversationId: other.id, objective: "active plan", start: false }
+      });
+      expect(plan.statusCode, plan.body).toBe(201);
+      const bothWhilePlan = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { conversationId: other.id, message: "both again", planMode: true, goalMode: true }
+      });
+      expect(bothWhilePlan.statusCode, bothWhilePlan.body).toBe(409);
+      expect(bothWhilePlan.json().error).toBe("MODE_CONFLICT");
+      const goalWhilePlan = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { conversationId: other.id, message: "goal", goalMode: true }
+      });
+      expect(goalWhilePlan.statusCode, goalWhilePlan.body).toBe(409);
+      expect(goalWhilePlan.json().error).toBe("GOAL_PLAN_CONFLICT");
+      const directGoal = await app.inject({
+        method: "POST",
+        url: "/api/goals",
+        payload: {
+          conversationId: other.id,
+          objective: "blocked goal",
+          start: false,
+          execution: { executorId: "native", taskKind: "general", expectedOutputs: [], networkHosts: [] }
+        }
+      });
+      expect(directGoal.statusCode, directGoal.body).toBe(409);
+      expect(directGoal.json().error).toBe("GOAL_PLAN_CONFLICT");
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 function parseSse(body: string): { event: string; data: any }[] {

@@ -83,12 +83,14 @@ describe("Hearth scheduler", () => {
     const conversation = fullConversation();
     const plans = new PlanService({ service, planRoot: join(requireTemp(), "plans") });
     let nativeCalls = 0;
+    let planningTools: string[] = [];
     const scheduler = makeScheduler(service, async () => FAKE_RESULT, {
       plans,
       modelSettingsForExecutor: () => chatSettings(),
-      nativeRunner: async () => {
+      nativeRunner: async (options) => {
         nativeCalls += 1;
         if (nativeCalls === 1) {
+          planningTools = (options.extraTools ?? []).map((tool) => tool.definition.name);
           return {
             status: "waiting_input",
             finalResponse: "Which branch should I target?",
@@ -122,9 +124,10 @@ describe("Hearth scheduler", () => {
     const planningMode = store!.listEvents(0, plan.planningTaskId!).filter((event) => event.type === "agent.mode").at(-1);
     expect(planningMode?.payload).toMatchObject({
       requested: "team",
-      effective: "single",
-      forcedBy: "plan"
+      effective: "team",
+      owner: "hearth"
     });
+    expect(planningTools).toEqual(expect.arrayContaining(["agent", "agent_wait", "agent_status"]));
 
     plans.continuePlanning(plan.id, "Target main", { textInput: "Target main" });
     const awaiting = await waitForPlanStage(plans, plan.id, "awaiting_approval");
