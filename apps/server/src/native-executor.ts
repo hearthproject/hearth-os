@@ -429,7 +429,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     modelId: options.settings.model,
     requireFinishTool: true,
     // 真实交付任务必须先建计划；草稿、子代理、计划模式与恢复执行跳过。
-    requirePlanFirst: !drafting && !options.isSubagent && (options.mode ?? "build") === "build" && !resume,
+    requirePlanFirst: !drafting && !directRead && !options.isSubagent && (options.mode ?? "build") === "build" && !resume,
     stopOnToolError: drafting,
     verifyGoalCompletion: async (goal) => {
       try {

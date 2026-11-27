@@ -1109,8 +1109,10 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     }
     // 首轮计划硬门槛：构建模式的多步骤交付必须先提交计划，否则拒绝执行本轮工具调用，
     // 把要求推回给模型。连续忽略则由运行时生成最小计划兜底，保证 plan/todos 非空。
+    const hasPlanTools = tools.some((tool) => tool.definition.name === "submit_plan" || tool.definition.name === "todo_write");
     if (
       options.requirePlanFirst &&
+      hasPlanTools &&
       !options.resume &&
       !state.plan &&
       state.todos.length === 0 &&
@@ -1142,7 +1144,11 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       ]));
       emitTodosIfChanged();
       emit({ type: "notice", message: "模型未提交计划，运行时已生成最小执行计划，等待你确认后再继续" });
-      const fallbackPlan = renderPlanContext(state.plan) ?? state.todos.map((todo) => `- ${todo.content}`).join("\n");
+      const fallbackPlan = [
+        "我先生成了一个最小执行计划，请确认后继续；如果需要调整，直接告诉我你想改的地方。",
+        "",
+        ...state.todos.map((todo, index) => `${index + 1}. ${todo.content}`)
+      ].join("\n");
       summary = fallbackPlan;
       await checkpoint("plan", true);
       clearExecuting();
