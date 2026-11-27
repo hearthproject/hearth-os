@@ -119,7 +119,7 @@ export interface AgentToolMetadata {
   eof?: boolean;
   agentId?: string;
   subagentType?: string;
-  agentStatus?: "running" | "completed" | "failed" | "cancelled";
+  agentStatus?: "running" | "completed" | "failed" | "cancelled" | "blocked";
   branch?: string;
   commitSha?: string;
   transcriptPath?: string;
@@ -230,7 +230,7 @@ export interface AgentSubagentState {
 export interface AgentActiveWork {
   id: string;
   kind: "shell" | "subagent";
-  status: "running" | "completed" | "failed" | "lost" | "cancelled";
+  status: "running" | "completed" | "failed" | "lost" | "cancelled" | "blocked";
   label?: string;
   startedAt: number;
   endedAt?: number;

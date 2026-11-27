@@ -14,6 +14,22 @@ export interface RunEvidenceOperation {
   settledAt: string | null;
 }
 
+export interface AgentModeEvidence {
+  requested: "single" | "team";
+  /** Old evidence may say executor-managed; new runs always resolve to single/team. */
+  effective: "single" | "team" | "executor-managed";
+  executorId: string;
+  owner?: string;
+  guarantee?: string;
+  capability?: string;
+  visibility?: string;
+  configApplied?: boolean;
+  degraded?: boolean;
+  observed?: { members: number; eventsReceived: boolean; source: string };
+  usage?: "full" | "total-only" | "none";
+  reason?: string;
+}
+
 export interface RunEvidenceInput {
   task: TaskRecord;
   run: RunRecord;
@@ -22,11 +38,7 @@ export interface RunEvidenceInput {
   operations: RunEvidenceOperation[];
   artifacts: ArtifactRecord[];
   recovery: ContextItem[];
-  agentMode?: {
-    requested: "single" | "team";
-    effective: "single" | "team" | "executor-managed";
-    executorId: string;
-  } | null;
+  agentMode?: AgentModeEvidence | null;
   now?: Date;
 }
 
@@ -36,11 +48,7 @@ export interface RunEvidence {
   generatedAt: string;
   task: Pick<TaskRecord, "id" | "title" | "status" | "executorId" | "error">;
   run: Pick<RunRecord, "id" | "attempt" | "status" | "threadId" | "startedAt" | "endedAt" | "failure" | "usage">;
-  agentMode?: {
-    requested: "single" | "team";
-    effective: "single" | "team" | "executor-managed";
-    executorId: string;
-  } | null;
+  agentMode?: AgentModeEvidence | null;
   checkpoint: { seq: number; kind: string; path: string; sha256: string; eventSeq: number | null } | null;
   recovery: Array<{ phase: unknown; decision: unknown; reasons: unknown; content: string; createdAt: string }>;
   operations: RunEvidenceOperation[];

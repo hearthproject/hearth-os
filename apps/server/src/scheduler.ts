@@ -14,7 +14,7 @@ import type {
 } from "@hearth/agent-runtime";
 import { deserializeAgentState, inspectJournal, journalPathFor, killWindowsProcessTree, resolveDesktopFilePath, CODING_RUN_BUDGET } from "@hearth/agent-runtime";
 import { checkpointSnapshotFromEvent, RUNTIME_CHECKPOINT_EVENT, runtimeJournalEvents, SqliteRuntimeJournal } from "./sqlite-runtime-journal.ts";
-import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, ContextUsageSnapshot, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskPauseResult, TaskProgressDetail, TaskRecord, TaskResumeReference } from "@hearth/core";
+import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, ContextUsageSnapshot, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskPauseResult, TaskProgressDetail, TaskRecord, TaskResumeReference, TeamOutcome } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
 import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprovalDecision } from "./approvals.ts";
@@ -43,7 +43,7 @@ import { HandoffService } from "./handoff.ts";
 import { loadExecutorSettings } from "./executor-settings.ts";
 import { executorHealth as readExecutorHealth } from "./executor-runtime.ts";
 import { sanitizeProgressDetail } from "./progress-detail.ts";
-import { buildRunEvidence, type RunEvidenceOperation } from "./run-evidence.ts";
+import { buildRunEvidence, type AgentModeEvidence, type RunEvidenceOperation } from "./run-evidence.ts";
 import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorId } from "./executors.ts";
 import { extractProposedComment, inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
 import { canBlindRetry, classifyFailureClass, decideDisposition } from "./failure-policy.ts";
@@ -64,7 +64,8 @@ import { mcpBridgeLaunch } from "./mcp-bridge-runtime.ts";
 import { OntologyService } from "./ontology.ts";
 import { createPersonalReadTools } from "./personal-tools.ts";
 import { createAgentTool, createSubagentResumeHandler, createSubagentTool, MAX_SUBAGENTS, MAX_TOTAL_SUBAGENTS, type SubagentFinishedInfo } from "./subagents.ts";
-import { agentModePrompt, resolveAgentMode, TEAM_AGENT_TYPES, TEAM_RECEIPT_SCHEMA } from "./agent-mode.ts";
+import { agentModePrompt, resolveAgentMode, TEAM_AGENT_TYPES, TEAM_RECEIPT_SCHEMA, type AgentModeResolution } from "./agent-mode.ts";
+import { teamCapabilityFor } from "./team-capability.ts";
 import { createAgentLifecycleTools, SubagentTaskManager } from "./subagent-manager.ts";
 import { createJobTools } from "./job-tools.ts";
 import { OntologyWriter } from "./ontology-writer.ts";
@@ -1872,23 +1873,78 @@ export class HearthScheduler {
       // Evidence is diagnostic; a write failure must never mask the real outcome.
     }
   }
-  private agentModeEvidenceForRun(taskId: string, runId: string): {
-    requested: "single" | "team";
-    effective: "single" | "team" | "executor-managed";
-    executorId: string;
-  } | null {
-    const event = this.service.store.listEvents(0, taskId)
-      .find((item) => item.runId === runId && item.type === "agent.mode");
+  private agentModeEvidenceForRun(taskId: string, runId: string): AgentModeEvidence | null {
+    const events = this.service.store.listEvents(0, taskId)
+      .filter((item) => item.runId === runId && item.type === "agent.mode");
+    const event = events.at(-1);
     const payload = event?.payload;
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
     const value = payload as Record<string, unknown>;
     const requested = value.requested === "team" ? "team" : "single";
     const effective = value.effective === "team" ? "team" : value.effective === "single" ? "single" : "executor-managed";
+    const observed = value.observed && typeof value.observed === "object" && !Array.isArray(value.observed)
+      ? value.observed as Record<string, unknown>
+      : null;
     return {
       requested,
       effective,
-      executorId: typeof value.executorId === "string" ? value.executorId : "native"
+      executorId: typeof value.executorId === "string" ? value.executorId : "native",
+      ...(typeof value.owner === "string" ? { owner: value.owner } : {}),
+      ...(typeof value.guarantee === "string" ? { guarantee: value.guarantee } : {}),
+      ...(typeof value.capability === "string" ? { capability: value.capability } : {}),
+      ...(typeof value.visibility === "string" ? { visibility: value.visibility } : {}),
+      ...(typeof value.configApplied === "boolean" ? { configApplied: value.configApplied } : {}),
+      ...(typeof value.degraded === "boolean" ? { degraded: value.degraded } : {}),
+      ...(observed
+        ? {
+            observed: {
+              members: typeof observed.members === "number" ? observed.members : 0,
+              eventsReceived: observed.eventsReceived === true,
+              source: typeof observed.source === "string" ? observed.source : "none"
+            }
+          }
+        : {}),
+      ...(value.usage === "full" || value.usage === "total-only" || value.usage === "none"
+        ? { usage: value.usage }
+        : {}),
+      ...(typeof value.reason === "string" ? { reason: value.reason } : {})
     };
+  }
+
+  /**
+   * Persists the post-run Team facts. The pre-run `agent.mode` event carries the
+   * request; this final event adds what actually happened so evidence and the UI
+   * never have to infer `configApplied` or member counts.
+   */
+  private appendTeamOutcome(
+    taskId: string,
+    runId: string,
+    resolution: AgentModeResolution,
+    outcome?: TeamOutcome
+  ): void {
+    const members = this.service.store.listEvents(0, taskId)
+      .filter((event) => event.runId === runId && event.type === "subagent.delegated").length;
+    const event = this.service.store.appendEvent({
+      type: "agent.mode",
+      taskId,
+      runId,
+      payload: {
+        ...resolution,
+        effective: outcome?.effective ?? resolution.effective,
+        configApplied: outcome?.configApplied ?? false,
+        degraded: outcome?.degraded ?? resolution.degraded,
+        observed: {
+          members,
+          eventsReceived: members > 0,
+          source: outcome?.owner ?? resolution.owner
+        },
+        usage: outcome?.usage ?? "none",
+        final: true,
+        ...(outcome ? {} : { failedBeforeOutcome: true }),
+        at: new Date().toISOString()
+      }
+    });
+    this.service.bus.publish(event);
   }
 
   private async runTask(startingTask: TaskRecord): Promise<void> {
@@ -2430,7 +2486,12 @@ export class HearthScheduler {
     const taskId = task.id;
     const runId = run.id;
     const requestedAgentMode = this.service.conversationSettings(task.conversationId)?.agentMode ?? "single";
-    const resolvedAgentMode = resolveAgentMode(requestedAgentMode, executorId);
+    const executorRuntimeSettings = this.executorSettings().executors[executorId] ?? null;
+    const teamCapability = teamCapabilityFor(executorId, this.executorSettingsPath, executorRuntimeSettings);
+    const resolvedAgentMode = resolveAgentMode(requestedAgentMode, executorId, {
+      taskMode: task.mode ?? "build",
+      capability: teamCapability
+    });
     const modeEvent = this.service.store.appendEvent({
       type: "agent.mode",
       taskId,
@@ -2438,6 +2499,14 @@ export class HearthScheduler {
       payload: { ...resolvedAgentMode, at: new Date().toISOString() }
     });
     this.service.bus.publish(modeEvent);
+    if (resolvedAgentMode.degraded) {
+      this.publishProgress(
+        taskId,
+        runId,
+        "notice",
+        `团队能力不可用：${resolvedAgentMode.reason ?? "未知原因"}。本次按单 Agent 执行。`
+      );
+    }
     try {
       this.recordRunInput(task, run, pendingInput);
       const expectedOutputs = expectedOutputsForTask(task);
@@ -2610,7 +2679,7 @@ export class HearthScheduler {
           : input.resumePrompt;
       }
       if (conversationBrief) prompt = `${prompt}\n\n${conversationBrief}`;
-      prompt = `${prompt}\n\n${agentModePrompt(resolvedAgentMode.requested, executorId)}`;
+      prompt = `${prompt}\n\n${agentModePrompt(resolvedAgentMode)}`;
       const extraNativeTools: import("@hearth/agent-runtime").AgentTool[] = createPersonalReadTools({
         service: this.service,
         ontology: this.ontology
@@ -2643,6 +2712,7 @@ export class HearthScheduler {
         }));
       }
       let subagentManager: SubagentTaskManager | undefined;
+      const observedTeamMembers = new Set<string>();
       if (this.library) extraNativeTools.push(...createLibraryTools(this.library));
       if (this.skills) extraNativeTools.push(...createSkillTools({ skills: this.skills, taskId, runId }));
       if (executorId === "native" && this.mcpServers) {
@@ -2666,6 +2736,23 @@ export class HearthScheduler {
         const safeTaskId = task.id.replace(/[^A-Za-z0-9._-]/g, "-") || "task";
         const manager = new SubagentTaskManager(4, join(taskRoot, ".hearth", "subagents", `${safeTaskId}.json`));
         subagentManager = manager;
+        for (const lost of manager.takeUnannouncedLost()) {
+          const event = this.service.store.appendEvent({
+            type: "subagent.failed",
+            taskId,
+            runId,
+            payload: {
+              childId: lost.id,
+              type: lost.type,
+              title: lost.title,
+              status: "lost",
+              source: "hearth",
+              error: lost.error ?? "执行器重启后成员会话丢失",
+              at: new Date().toISOString()
+            }
+          });
+          this.service.bus.publish(event);
+        }
         const usedSubagents = this.service.store.listEvents(0, task.id)
           .filter((event) => event.type === "subagent.delegated").length;
         const remainingSubagents = Math.max(0, Math.min(
@@ -2702,18 +2789,23 @@ export class HearthScheduler {
             workspaceRoot: prepared.root,
             signal: controller.signal
           }),
-          onStarted: (info: { childId: string; mode: "read-only" | "isolated-write"; title: string; type: SubagentType }) => {
+          onStarted: (info: { childId: string; mode: "read-only" | "isolated-write"; title: string; type: SubagentType; parentId?: string; depth?: number }) => {
             const event = this.service.store.appendEvent({
               type: "subagent.delegated",
               taskId,
               runId,
-              payload: { ...info, at: new Date().toISOString() }
+              payload: { ...info, source: "hearth", at: new Date().toISOString() }
             });
             this.service.bus.publish(event);
           },
           onFinished: (info: SubagentFinishedInfo) => {
+            const type = info.status === "completed"
+              ? "subagent.completed"
+              : info.status === "blocked"
+                ? "subagent.blocked"
+                : "subagent.failed";
             const event = this.service.store.appendEvent({
-              type: info.status === "completed" ? "subagent.completed" : "subagent.failed",
+              type,
               taskId,
               runId,
               payload: {
@@ -2721,9 +2813,11 @@ export class HearthScheduler {
                 type: info.type,
                 title: info.title,
                 status: info.status,
+                source: "hearth",
                 durationMs: info.durationMs,
                 ...(info.usage ? { usage: info.usage } : {}),
                 ...(info.summary ? { summary: info.summary.slice(0, 800) } : {}),
+                ...(info.structured === undefined ? {} : { structured: info.structured }),
                 ...(info.reportPath ? { reportPath: info.reportPath } : {}),
                 transcriptPath: info.transcriptPath,
                 ...(info.error ? { error: info.error } : {}),
@@ -2760,6 +2854,30 @@ export class HearthScheduler {
         fullPermission,
         operationLedger: this.operationLedger,
         runtimeJournal: new SqliteRuntimeJournal(this.service.store, taskId, runId),
+        team: resolvedAgentMode,
+        onTeamMember: (member) => {
+          const key = `${member.memberId}:${member.status}`;
+          if (observedTeamMembers.has(key)) return;
+          observedTeamMembers.add(key);
+          const event = this.service.store.appendEvent({
+            type: member.status === "started"
+              ? "subagent.delegated"
+              : member.status === "completed"
+                ? "subagent.completed"
+                : "subagent.failed",
+            taskId,
+            runId,
+            payload: {
+              childId: member.memberId,
+              ...(member.parentId ? { parentId: member.parentId } : {}),
+              title: member.title ?? "DSH 成员",
+              status: member.status,
+              source: "deepseek-harness",
+              at: new Date().toISOString()
+            }
+          });
+          this.service.bus.publish(event);
+        },
         ...(subagentManager ? { steering: () => subagentManager?.stallNotices() ?? [] } : {}),
         isFullPermission: () => this.service.approvalModeForTask(task) === "full",
         contextSettings: this.context.settings(),
@@ -2812,8 +2930,16 @@ export class HearthScheduler {
           prompt: executionPrompt,
           ...(resumePrompt ? { resumePrompt } : {})
         };
-        if (resume && adapter.resume) return adapter.resume({ ...invocation, resume });
-        return adapter.execute(invocation);
+        try {
+          const outcome = resume && adapter.resume
+            ? await adapter.resume({ ...invocation, resume })
+            : await adapter.execute(invocation);
+          this.appendTeamOutcome(taskId, runId, resolvedAgentMode, outcome.team);
+          return outcome;
+        } catch (error) {
+          this.appendTeamOutcome(taskId, runId, resolvedAgentMode);
+          throw error;
+        }
       };
 
       const rememberSession = (outcome: ExecutionOutcome) => {

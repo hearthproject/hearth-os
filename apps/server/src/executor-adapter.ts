@@ -19,12 +19,14 @@ import type {
   RunRecord,
   RunUsage,
   TaskProgressDetail,
-  TaskRecord
+  TaskRecord,
+  TeamOutcome
 } from "@hearth/core";
 import type { CodexRunOptions, CodexRunResult } from "@hearth/codex-executor";
-import { runDeepSeekHarness, type DeepSeekHarnessRunOptions, type DeepSeekHarnessRunResult, type DshApprovalOutcome, type DshApprovalRequest, type DshContextEvent } from "@hearth/deepseek-executor";
+import { runDeepSeekHarness, type DeepSeekHarnessRunOptions, type DeepSeekHarnessRunResult, type DshApprovalOutcome, type DshApprovalRequest, type DshContextEvent, type DshTeamMemberEvent } from "@hearth/deepseek-executor";
 import { executorHome } from "./executor-runtime.ts";
 import type { ModelSettings } from "./model-settings.ts";
+import type { AgentModeResolution } from "./agent-mode.ts";
 import { nativePermissionsFor, withExtraToolPermissions, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 import { wantsScreenshot } from "./task-intent.ts";
@@ -49,6 +51,8 @@ export interface ExecutionOutcome {
   resume?: AgentResumeState;
   failure?: AgentFailure;
   budgetExhaustion?: Pick<BudgetExhaustion, "dimension" | "limit">;
+  /** Team facts the adapter itself can prove (config applied, member events). */
+  team?: TeamOutcome;
 }
 
 export interface ExecutorAttemptContext {
@@ -74,6 +78,10 @@ export interface ExecutorAttemptContext {
   finishGuards?: Array<() => string | null>;
   mcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
   steering?: (() => AgentMessage[]) | undefined;
+  /** Resolved Team decision for this attempt; absent means legacy single behavior. */
+  team?: AgentModeResolution;
+  /** External-executor member events (Codex never emits them today). */
+  onTeamMember?: (event: DshTeamMemberEvent) => void;
   onProgress: (event: { kind: string; message: string; detail?: TaskProgressDetail }) => void;
   onNativeContextEvent: (event: RuntimeEvent) => void;
   onNativeCheckpoint: (checkpoint: AgentCheckpoint) => void | Promise<void>;
@@ -103,6 +111,38 @@ export interface ExecutorAvailability {
   reason?: string;
 }
 
+
+
+function teamOutcome(
+  input: ExecutorInvocation,
+  options: {
+    configApplied: boolean;
+    members?: number;
+    eventsReceived?: boolean;
+    usage?: "full" | "total-only" | "none";
+  }
+): TeamOutcome | undefined {
+  const team = input.team;
+  if (!team) return undefined;
+  return {
+    requested: team.requested,
+    effective: team.effective,
+    executorId: team.executorId,
+    owner: team.owner,
+    guarantee: team.guarantee,
+    capability: team.capability,
+    visibility: team.visibility,
+    configApplied: options.configApplied,
+    degraded: team.degraded,
+    observed: {
+      members: options.members ?? 0,
+      eventsReceived: options.eventsReceived ?? false,
+      source: team.owner
+    },
+    usage: options.usage ?? "none",
+    ...(team.reason ? { reason: team.reason } : {})
+  };
+}
 
 //用统一接口约定“怎么调用执行器”
 export interface ExecutorAdapter {
@@ -162,6 +202,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       ...(input.onAuthorizeTool ? { onAuthorizeTool: input.onAuthorizeTool } : {}),
       ...(input.isFullPermission ? { isFullPermission: input.isFullPermission } : {})
     });
+    const team = teamOutcome(input, { configApplied: true, usage: "full" });
     return {
       status: outcome.status,
       finalResponse: outcome.finalResponse,
@@ -177,6 +218,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
         : {}),
       ...(outcome.failure ? { failure: outcome.failure } : {}),
       ...(outcome.budgetExhaustion ? { budgetExhaustion: outcome.budgetExhaustion } : {}),
+      ...(team ? { team } : {}),
       ...(outcome.messages
         ? { resume: { messages: outcome.messages, usage: outcome.usage, turns: outcome.turns, toolCalls: outcome.toolCalls } }
         : {})
@@ -204,6 +246,13 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
   async execute(input: ExecutorInvocation): Promise<ExecutionOutcome> {
     const planMode = input.mode === "plan";
     const resumeThreadId = planMode ? undefined : input.activeThreadId;
+    const multiAgent = input.team
+      ? {
+          enabled: input.team.effective === "team",
+          maxThreads: 4,
+          maxDepth: 1
+        }
+      : undefined;
     const result = await this.runner({
       workingDirectory: input.prepared.root,
       outDir: input.prepared.outDir,
@@ -213,6 +262,7 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       sandboxMode: planMode ? "read-only" : "danger-full-access",
       approvalPolicy: "never",
       ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
+      ...(multiAgent ? { multiAgent } : {}),
       ...(resumeThreadId ? { threadId: resumeThreadId } : {}),
       onEvent: (event) => input.onProgress({
         kind: event.type,
@@ -223,6 +273,8 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       onThreadStarted: input.onCodexThreadStarted
     });
     if (result.threadId && result.threadId !== input.activeThreadId) input.onCodexThreadStarted(result.threadId);
+    // Codex exposes no member events, so "total-only" is a fact, not a guess.
+    const team = teamOutcome(input, { configApplied: Boolean(multiAgent), usage: "total-only" });
     return {
       status: "completed",
       finalResponse: result.finalResponse,
@@ -230,6 +282,7 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       threadId: result.threadId,
       label: result.profileLabel,
       question: null,
+      ...(team ? { team } : {}),
       ...(planMode ? { planMarkdown: result.finalResponse, planSubmitted: true } : {})
     };
   }
@@ -268,6 +321,10 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
     if (!settings) throw new Error("DeepSeek Harness 还没有绑定模型，请到设置中选择模型档案");
     if (settings.protocol === "gemini") throw new Error("DeepSeek Harness 不支持 Gemini 协议");
     const planMode = input.mode === "plan";
+    const agentTeam = input.team
+      ? { enabled: input.team.effective === "team", maxMembers: 8, maxTasks: 256 }
+      : undefined;
+    const members = new Set<string>();
     const result = await this.runner({
       settings: {
         protocol: settings.protocol,
@@ -290,6 +347,15 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
         : {}),
       ...(!planMode && input.activeThreadId ? { resumeSessionId: input.activeThreadId } : {}),
       signal: input.signal,
+      ...(agentTeam ? { agentTeam } : {}),
+      ...(input.onTeamMember
+        ? {
+            onTeamMember: (event: DshTeamMemberEvent) => {
+              members.add(event.memberId);
+              input.onTeamMember?.(event);
+            }
+          }
+        : {}),
       onProgress: (event) => input.onProgress({
         kind: event.type,
         message: event.message,
@@ -301,6 +367,12 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
     });
     const question = result.question?.trim() || null;
     const planMarkdown = planMode ? result.planMarkdown?.trim() || null : null;
+    const team = teamOutcome(input, {
+      configApplied: Boolean(agentTeam),
+      members: members.size,
+      eventsReceived: members.size > 0,
+      usage: "total-only"
+    });
     return {
       status: planMarkdown || !question ? "completed" : "waiting_input",
       finalResponse: result.finalResponse,
@@ -308,6 +380,7 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
       threadId: result.sessionId,
       label: `deepseek-harness / ${result.sessionId}`,
       question,
+      ...(team ? { team } : {}),
       ...(planMarkdown ? { planMarkdown, planSubmitted: true } : {})
     };
   }

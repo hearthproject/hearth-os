@@ -113,11 +113,18 @@ describe("Hearth scheduler", () => {
     });
     plans.attachScheduler(scheduler);
     scheduler.start();
+    store!.updateConversationSettings(conversation.id, { agentMode: "team" });
 
     const plan = plans.create({ conversationId: conversation.id, objective: "Plan with clarification", textInput: "Plan with clarification" });
     const waiting = await waitForStatus(service, plan.planningTaskId!, "waiting_input");
     expect(waiting.resultSummary).toContain("Which branch");
     expect(plans.get(plan.id)?.stage).toBe("planning");
+    const planningMode = store!.listEvents(0, plan.planningTaskId!).filter((event) => event.type === "agent.mode").at(-1);
+    expect(planningMode?.payload).toMatchObject({
+      requested: "team",
+      effective: "single",
+      forcedBy: "plan"
+    });
 
     plans.continuePlanning(plan.id, "Target main", { textInput: "Target main" });
     const awaiting = await waitForPlanStage(plans, plan.id, "awaiting_approval");
@@ -280,6 +287,13 @@ describe("Hearth scheduler", () => {
 
     const modeEvent = store!.listEvents(0, task.id).find((event) => event.type === "agent.mode");
     expect(modeEvent?.payload).toMatchObject({ requested: "team", effective: "team", executorId: "native" });
+    const finalMode = store!.listEvents(0, task.id).filter((event) => event.type === "agent.mode").at(-1);
+    expect(finalMode?.payload).toMatchObject({
+      final: true,
+      configApplied: true,
+      usage: "full",
+      observed: { members: 0, eventsReceived: false, source: "hearth" }
+    });
     expect(service.requireTask(task.id).status).toBe("completed");
   });
 

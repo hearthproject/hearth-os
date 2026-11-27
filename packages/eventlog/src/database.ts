@@ -4509,6 +4509,7 @@ export class HearthStore {
       case "agent.mode":
       case "subagent.delegated":
       case "subagent.completed":
+      case "subagent.blocked":
       case "subagent.failed":
       case "approval.expired":
       case "approval.auto_approved":

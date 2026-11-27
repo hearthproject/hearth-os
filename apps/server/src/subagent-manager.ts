@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import type { AgentMessage, AgentTool, AgentToolResult, HarnessMode } from "@hearth/agent-runtime";
 import type { RunBudget, TaskPermissions, TaskRecord, TaskWorktree } from "@hearth/core";
 
-export type ManagedAgentStatus = "running" | "completed" | "failed" | "cancelled" | "lost";
+export type ManagedAgentStatus = "running" | "completed" | "failed" | "cancelled" | "lost" | "blocked";
 
 export interface ManagedAgentSession {
   childId: string;
@@ -45,6 +45,8 @@ export interface ManagedAgent {
   checkpointPath?: string | undefined;
   journalPath?: string | undefined;
   stallNotices?: Set<number> | undefined;
+  /** Lost jobs are announced to the conversation exactly once. */
+  lossAnnounced?: boolean | undefined;
 }
 
 export interface ManagedAgentView {
@@ -82,6 +84,15 @@ export class SubagentTaskManager {
 
   takeNotifications(): AgentMessage[] {
     return this.notifications.splice(0, this.notifications.length);
+  }
+
+  /** Returns lost jobs that no run has reported yet, and marks them announced. */
+  takeUnannouncedLost(): ManagedAgent[] {
+    const lost = [...this.jobs.values()].filter((job) => job.status === "lost" && job.lossAnnounced !== true);
+    if (lost.length === 0) return [];
+    for (const job of lost) job.lossAnnounced = true;
+    this.persist();
+    return lost;
   }
 
   start(
@@ -178,8 +189,13 @@ export class SubagentTaskManager {
   private attach(job: ManagedAgent, promise: Promise<AgentToolResult>): Promise<AgentToolResult> {
     return promise
       .then((result) => {
+        const memberStatus = (result.metadata as Record<string, unknown> | undefined)?.agentStatus;
         job.result = result;
-        job.status = job.controller.signal.aborted ? "cancelled" : "completed";
+        job.status = job.controller.signal.aborted
+          ? "cancelled"
+          : memberStatus === "blocked" || memberStatus === "failed"
+            ? memberStatus
+            : "completed";
         job.lastProgressAt = new Date().toISOString();
         this.notify(job);
         return result;
@@ -265,6 +281,7 @@ export class SubagentTaskManager {
         transcriptPath: job.transcriptPath,
         sessionId: job.sessionId,
         error: job.error,
+        lossAnnounced: job.lossAnnounced === true,
         ...(job.session ? { session: job.session } : {}),
         ...(job.checkpointPath ? { checkpointPath: job.checkpointPath } : {}),
         ...(job.journalPath ? { journalPath: job.journalPath } : {})
@@ -289,7 +306,7 @@ export class SubagentTaskManager {
           id: entry.id,
           type: typeof entry.type === "string" ? entry.type : "general-purpose",
           title: typeof entry.title === "string" ? entry.title : entry.id,
-          status: status === "completed" || status === "failed" || status === "cancelled" || status === "lost" ? status : "lost",
+          status: status === "completed" || status === "failed" || status === "cancelled" || status === "lost" || status === "blocked" ? status : "lost",
           startedAt: typeof entry.startedAt === "string" ? entry.startedAt : new Date().toISOString(),
           endedAt: typeof entry.endedAt === "string" ? entry.endedAt : new Date().toISOString(),
           lastProgressAt: typeof entry.lastProgressAt === "string" ? entry.lastProgressAt : new Date().toISOString(),
@@ -302,7 +319,8 @@ export class SubagentTaskManager {
           ...(session ? { session } : {}),
           ...(typeof entry.checkpointPath === "string" ? { checkpointPath: entry.checkpointPath } : {}),
           ...(typeof entry.journalPath === "string" ? { journalPath: entry.journalPath } : {}),
-          stallNotices: new Set()
+          stallNotices: new Set(),
+          lossAnnounced: entry.lossAnnounced === true
         };
         this.jobs.set(job.id, job);
       }

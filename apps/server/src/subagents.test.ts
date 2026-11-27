@@ -148,6 +148,41 @@ describe("native subagents", () => {
     expect(finished[0]).toMatchObject({ status: "completed", structured: { status: "completed" } });
   });
 
+  it("keeps a blocked receipt out of completion and reports the real status", async () => {
+    const parentWorktree = worktrees.ensure(task);
+    const finished: SubagentFinishedInfo[] = [];
+    const tool = createAgentTool({
+      task,
+      prepared: { root: parentWorktree.path, outDir: join(parentWorktree.path, "out"), inputs: [] },
+      settings: settings(),
+      permissions,
+      signal: new AbortController().signal,
+      worktrees,
+      parentWorktree,
+      allowedTypes: ["explore"],
+      defaultOutputSchema: TEAM_RECEIPT_SCHEMA,
+      evidenceRoot: join(root, "agents"),
+      onFinished: (info) => finished.push(info),
+      runner: async () => result(JSON.stringify({
+        status: "blocked",
+        summary: "缺少远端凭据，无法核验",
+        evidence: [{ claim: "远端返回 401", source: "curl https://example.test" }],
+        unresolved: ["需要用户提供测试凭据"]
+      }))
+    });
+
+    const output = await tool.execute({ subagent_type: "explore", description: "核验远端", prompt: "核验远端数据" }, context(parentWorktree.path));
+
+    expect(output.content).toContain("status: blocked");
+    expect(output.metadata).toMatchObject({ agentStatus: "blocked" });
+    expect(finished[0]).toMatchObject({
+      status: "blocked",
+      structured: { status: "blocked", unresolved: ["需要用户提供测试凭据"] }
+    });
+    const report = String(output.metadata?.reportPath ?? "");
+    expect(JSON.parse(readFileSync(report, "utf8")).status).toBe("blocked");
+  });
+
   it("rejects write-capable member types in Team v1", async () => {
     const parentWorktree = worktrees.ensure(task);
     const tool = createAgentTool({

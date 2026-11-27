@@ -39,7 +39,7 @@ export interface SubagentFinishedInfo {
   childId: string;
   type: SubagentType;
   title: string;
-  status: "completed" | "failed" | "cancelled";
+  status: "completed" | "failed" | "cancelled" | "blocked";
   durationMs: number;
   usage?: RunUsage | undefined;
   summary?: string | undefined;
@@ -75,7 +75,7 @@ export interface SubagentToolOptions {
   taskId?: string | undefined;
   operationLedger?: OperationLedger | undefined;
   onAuthorizeTool?: ((request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>) | undefined;
-  onStarted?: ((info: { childId: string; mode: "read-only" | "isolated-write"; title: string; type: SubagentType }) => void) | undefined;
+  onStarted?: ((info: { childId: string; mode: "read-only" | "isolated-write"; title: string; type: SubagentType; parentId?: string; depth?: number }) => void) | undefined;
   onFinished?: ((info: SubagentFinishedInfo) => void) | undefined;
 }
 
@@ -199,7 +199,9 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
         childId,
         mode: profile.isolation === "worktree" ? "isolated-write" : "read-only",
         title: childTitle,
-        type: profile.type
+        type: profile.type,
+        parentId: options.task.id,
+        depth
       });
 
       const runStartedAt = Date.now();
@@ -210,14 +212,22 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
         startActiveWork(context.state, { id: childId, kind: "subagent", label: childTitle });
         try {
           const result = await runAgentJob(signal, extra);
-          finishActiveWork(context.state, childId, "completed");
-          if (parsed.stepId) completePlanStep(context.state, parsed.stepId, `${childTitle} 已完成`);
           const metadata = (result.metadata ?? {}) as Record<string, unknown>;
+          const agentStatus = metadata.agentStatus === "blocked"
+            ? "blocked"
+            : metadata.agentStatus === "failed"
+              ? "failed"
+              : "completed";
+          finishActiveWork(context.state, childId, agentStatus === "completed" ? "completed" : agentStatus === "blocked" ? "blocked" : "failed");
+          if (parsed.stepId) {
+            if (agentStatus === "completed") completePlanStep(context.state, parsed.stepId, `${childTitle} 已完成`);
+            else notePlanStep(context.state, parsed.stepId, `${childTitle} 回执状态为 ${agentStatus}`);
+          }
           options.onFinished?.({
             childId,
             type: profile.type as SubagentType,
             title: childTitle,
-            status: "completed",
+            status: agentStatus,
             durationMs: Date.now() - runStartedAt,
             usage: result.usage,
             summary: result.summary ?? summarizeToolResult(result.content),
@@ -229,15 +239,16 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
           });
           return result;
         } catch (error) {
-          finishActiveWork(context.state, childId, signal.aborted ? "cancelled" : "failed");
+          const cancelled = signal.aborted;
+          finishActiveWork(context.state, childId, cancelled ? "cancelled" : "failed");
           const failureMessage = errorMessage(error);
-          if (parsed.stepId && !signal.aborted) notePlanStep(context.state, parsed.stepId, failureMessage);
-          const reportPath = writeAgentFailureReport(session, error, runStartedAt);
+          if (parsed.stepId && !cancelled) notePlanStep(context.state, parsed.stepId, failureMessage);
+          const reportPath = writeAgentFailureReport(session, error, runStartedAt, cancelled ? "cancelled" : "failed");
           options.onFinished?.({
             childId,
             type: profile.type as SubagentType,
             title: childTitle,
-            status: signal.aborted ? "cancelled" : "failed",
+            status: cancelled ? "cancelled" : "failed",
             durationMs: Date.now() - runStartedAt,
             reportPath,
             transcriptPath,
@@ -329,18 +340,19 @@ async function executeAgentJob(input: {
   const usage = result.usage ?? zeroUsage();
   const summary = result.finalResponse || "未返回总结";
   const structured = session.outputSchema ? parseStructuredOutput(session.outputSchema, summary) : undefined;
+  const agentStatus = receiptStatus(structured);
   const structuredLine = structured === undefined ? [] : [`structured_output: ${JSON.stringify(structured)}`];
 
   if (!session.worktree) {
     const reportPath = writeAgentReport(session, {
-      status: "completed",
+      status: agentStatus,
       summary,
       usage,
       ...(structured === undefined ? {} : { structured })
     });
     appendTranscript(session.transcriptPath, {
       at: new Date().toISOString(),
-      event: "completed",
+      event: agentStatus,
       agentId: session.childId,
       type: session.type,
       summary,
@@ -352,7 +364,7 @@ async function executeAgentJob(input: {
     return {
       content: [
         `agentId: ${session.childId}`,
-        "status: completed",
+        `status: ${agentStatus}`,
         `type: ${session.type}`,
         `summary: ${summary}`,
         ...structuredLine,
@@ -364,7 +376,52 @@ async function executeAgentJob(input: {
       metadata: {
         agentId: session.childId,
         subagentType: session.type,
-        agentStatus: "completed",
+        agentStatus,
+        transcriptPath: session.transcriptPath,
+        reportPath,
+        ...(structured === undefined ? {} : { structured })
+      }
+    };
+  }
+
+  if (agentStatus !== "completed") {
+    const reportPath = writeAgentReport(session, {
+      status: agentStatus,
+      summary,
+      usage,
+      ...(structured === undefined ? {} : { structured }),
+      branch: session.worktree.branch
+    });
+    appendTranscript(session.transcriptPath, {
+      at: new Date().toISOString(),
+      event: agentStatus,
+      agentId: session.childId,
+      type: session.type,
+      summary,
+      usage,
+      ...(structured === undefined ? {} : { structured }),
+      branch: session.worktree.branch,
+      reportPath,
+      messages: result.messages ?? []
+    });
+    return {
+      content: [
+        `agentId: ${session.childId}`,
+        `status: ${agentStatus}`,
+        `type: ${session.type}`,
+        `summary: ${summary}`,
+        ...structuredLine,
+        `branch: ${session.worktree.branch}`,
+        `transcript: ${session.transcriptPath}`,
+        `report: ${reportPath}`,
+        "成员未完成，工作树未提交；请由父任务判断是否需要保留或清理。"
+      ].join("\n"),
+      usage,
+      metadata: {
+        agentId: session.childId,
+        subagentType: session.type,
+        agentStatus,
+        branch: session.worktree.branch,
         transcriptPath: session.transcriptPath,
         reportPath,
         ...(structured === undefined ? {} : { structured })
@@ -421,9 +478,16 @@ async function executeAgentJob(input: {
   };
 }
 
+/** Reads the member's own receipt status; defaults to completed only on a valid receipt. */
+function receiptStatus(structured: unknown): "completed" | "blocked" | "failed" {
+  if (!structured || typeof structured !== "object" || Array.isArray(structured)) return "completed";
+  const status = (structured as Record<string, unknown>).status;
+  return status === "blocked" || status === "failed" ? status : "completed";
+}
+
 /** Stable, task-scoped receipt used by the Lead and by post-run auditing. */
 function writeAgentReport(session: ManagedAgentSession, report: {
-  status: "completed" | "failed" | "cancelled";
+  status: "completed" | "failed" | "cancelled" | "blocked";
   summary?: string;
   error?: string;
   usage?: RunUsage;
@@ -463,7 +527,12 @@ function writeAgentReport(session: ManagedAgentSession, report: {
   return path;
 }
 
-function writeAgentFailureReport(session: ManagedAgentSession, error: unknown, startedAtMs: number): string {
+function writeAgentFailureReport(
+  session: ManagedAgentSession,
+  error: unknown,
+  startedAtMs: number,
+  status: "failed" | "cancelled" = "failed"
+): string {
   const path = join(dirname(session.transcriptPath), "report.json");
   const message = errorMessage(error);
   const body = {
@@ -473,7 +542,7 @@ function writeAgentFailureReport(session: ManagedAgentSession, error: unknown, s
     type: session.type,
     title: session.childTitle,
     objective: session.objective,
-    status: "failed",
+    status,
     startedAt: new Date(startedAtMs).toISOString(),
     endedAt: new Date().toISOString(),
     durationMs: Math.max(0, Date.now() - startedAtMs),
