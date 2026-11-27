@@ -4,15 +4,17 @@ import {
   ArrowLeft,
   CheckCircle2,
   Download,
+  ExternalLink,
   FolderDown,
   Loader2,
   PanelRightClose,
   PanelRightOpen,
+  X,
   XCircle
 } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { Markdown } from "./Markdown.tsx";
-import { desktopErrorMessage, hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
+import { desktopErrorMessage, hasDesktopBridge, openInBrowser, pickFolder } from "../lib/desktop.ts";
 import { formatBytes } from "../lib/format.ts";
 import { fileExtension, OFFICE_PREVIEW_LIMIT, previewKind, TEXT_PREVIEW_LIMIT } from "../lib/preview.ts";
 import { parseDelimited, parseDocx, parsePptx, parseXlsx, type SheetTable, type SlideText } from "../lib/office-preview.ts";
@@ -26,7 +28,12 @@ export function ChatWorkspacePanel({
   messages,
   tasks,
   preview,
-  onPreviewChange,
+  tabs,
+  activeKey,
+  onSelectTab,
+  onCloseTab,
+  onShowList,
+  onOpenPreview,
   onOpen,
   onClose
 }: {
@@ -34,7 +41,12 @@ export function ChatWorkspacePanel({
   messages: ChatMessageRecord[];
   tasks: TaskListItem[];
   preview: PreviewTarget | null;
-  onPreviewChange: (preview: PreviewTarget | null) => void;
+  tabs: PreviewTarget[];
+  activeKey: string | null;
+  onSelectTab: (key: string) => void;
+  onCloseTab: (key: string) => void;
+  onShowList: () => void;
+  onOpenPreview: (preview: PreviewTarget) => void;
   onOpen: () => void;
   onClose: () => void;
 }) {
@@ -76,7 +88,7 @@ export function ChatWorkspacePanel({
     <aside className="workspace-panel" aria-label="对话产物">
       <header className="workspace-head">
         {preview ? (
-          <button className="icon-button" onClick={() => onPreviewChange(null)} aria-label="返回产物" title="返回产物">
+          <button className="icon-button" onClick={onShowList} aria-label="返回产物" title="返回产物">
             <ArrowLeft size={15} />
           </button>
         ) : (
@@ -88,8 +100,40 @@ export function ChatWorkspacePanel({
         </button>
       </header>
 
+      {tabs.length > 0 && (
+        <div className="workspace-tabs" role="tablist" aria-label="已打开的预览">
+          {tabs.map((tab) => {
+            const key = previewKey(tab);
+            return (
+              <div key={key} className={`workspace-tab${key === activeKey ? " active" : ""}`}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={key === activeKey}
+                  className="workspace-tab-main"
+                  onClick={() => onSelectTab(key)}
+                  title={tab.name}
+                >
+                  <FileBadge name={tab.name} />
+                  <span>{tab.name}</span>
+                </button>
+                <button
+                  type="button"
+                  className="workspace-tab-close"
+                  onClick={() => onCloseTab(key)}
+                  aria-label={`关闭 ${tab.name}`}
+                  title={`关闭 ${tab.name}`}
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {preview ? (
-        <PreviewBody preview={preview} />
+        <PreviewBody key={activeKey ?? preview.url} preview={preview} />
       ) : (
         <div className="workspace-scroll">
           {artifacts.length > 0 && (
@@ -98,7 +142,7 @@ export function ChatWorkspacePanel({
               <ul className="workspace-list">
                 {artifacts.map((artifact) => (
                   <li key={artifact.id}>
-                    <button className="workspace-row" onClick={() => onPreviewChange(artifactPreviewTarget(artifact))}>
+                    <button className="workspace-row" onClick={() => onOpenPreview(artifactPreviewTarget(artifact))}>
                       <FileBadge name={artifact.relativePath} />
                       <span className="workspace-row-title">{fileName(artifact.relativePath)}</span>
                       <span className="workspace-row-meta">{formatBytes(artifact.bytes)}</span>
@@ -115,7 +159,7 @@ export function ChatWorkspacePanel({
               <ul className="workspace-list">
                 {attachments.map((attachment) => (
                   <li key={attachment.id}>
-                    <button className="workspace-row" onClick={() => onPreviewChange(attachmentPreviewTarget(attachment))}>
+                    <button className="workspace-row" onClick={() => onOpenPreview(attachmentPreviewTarget(attachment))}>
                       <FileBadge name={attachment.name} />
                       <span className="workspace-row-title">{attachment.name}</span>
                       <span className="workspace-row-meta">{formatBytes(attachment.bytes)}</span>
@@ -242,11 +286,28 @@ function PreviewBody({ preview }: { preview: PreviewTarget }) {
     }
   }
 
+  async function handleBrowserOpen() {
+    setExportMessage(null);
+    try {
+      await openInBrowser(preview.url);
+    } catch (caught) {
+      setExportMessage(`打开浏览器失败：${desktopErrorMessage(caught, "未知错误")}`);
+    }
+  }
+
   return (
     <>
       <div className="workspace-preview-bar">
         <span>{fileExtension(preview.name)} · {preview.bytes === null ? "—" : formatBytes(preview.bytes)}</span>
         <div>
+          <button
+            type="button"
+            className="workspace-preview-link"
+            onClick={() => void handleBrowserOpen()}
+            title="在系统默认浏览器中打开"
+          >
+            <ExternalLink size={13} /> 浏览器打开
+          </button>
           {preview.artifactId && hasDesktopBridge() && (
             <button
               type="button"
@@ -361,6 +422,10 @@ function SlidesPreview({ slides }: { slides: SlideText[] }) {
 
 function FileBadge({ name }: { name: string }) {
   return <span className="workspace-file-badge">{fileExtension(name).slice(0, 4)}</span>;
+}
+
+function previewKey(preview: PreviewTarget): string {
+  return `${preview.name}::${preview.url}`;
 }
 
 function JobBadge({ job }: { job: BackgroundToolJob }) {

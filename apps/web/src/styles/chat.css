@@ -7,6 +7,7 @@
 }
 
 .chat-main {
+  position: relative;
   width: 100%;
 }
 
@@ -460,6 +461,36 @@
   flex-direction: column;
   padding: 10px 16px 18px;
   background: linear-gradient(to bottom, transparent, var(--bg) 18%);
+}
+
+.chat-drop-overlay {
+  position: absolute;
+  inset: 8px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 2px dashed color-mix(in srgb, var(--accent) 55%, var(--line-strong));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  backdrop-filter: blur(2px);
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.chat-drop-overlay svg {
+  color: var(--accent);
+}
+
+.chat-drop-overlay strong {
+  font-size: var(--fs-15);
+}
+
+.chat-drop-overlay span {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-12);
 }
 
 .composer-drop-overlay {
@@ -2320,7 +2351,36 @@
   background: transparent;
   color: inherit;
   font: inherit;
+  max-width: 100%;
   cursor: pointer;
+}
+
+.message-attachment.with-thumb {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  text-align: left;
+}
+
+.message-attachment-thumb {
+  display: block;
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.message-attachment.with-thumb > span {
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .message-attachment:hover {

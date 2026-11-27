@@ -520,6 +520,20 @@
   font-size: var(--fs-11);
 }
 
+.attachment-chip.with-thumb {
+  padding: 4px 6px 4px 4px;
+  max-width: 300px;
+}
+
+.attachment-thumb {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--surface-sunk);
+}
+
 .attachment-chip span {
   overflow: hidden;
   text-overflow: ellipsis;

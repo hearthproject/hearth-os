@@ -158,6 +158,18 @@ interface ChatExecution {
   durationMs: number;
 }
 
+/** 每个会话独立的草稿：切换会话时输入框、附件和本轮选择都跟着会话走。 */
+interface ConversationDraft {
+  input: string;
+  attachments: ChatAttachment[];
+  skillId: string | null;
+  mcpServerIds: string[];
+}
+
+function previewKeyOf(preview: PreviewTarget): string {
+  return `${preview.name}::${preview.url}`;
+}
+
 interface ContextBreakdown {
   system?: number;
   conversation?: number;
@@ -249,7 +261,8 @@ export function ChatPage() {
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(() => getChatSelection().pendingProjectId);
   const [panelOpen, setPanelOpen] = useState(false);
   const [workspaceWidth, setWorkspaceWidth] = useState<number>(initialWorkspaceWidth);
-  const [workspacePreview, setWorkspacePreview] = useState<PreviewTarget | null>(null);
+  const [workspaceTabs, setWorkspaceTabs] = useState<PreviewTarget[]>([]);
+  const [activePreviewKey, setActivePreviewKey] = useState<string | null>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(() => new URLSearchParams(location.search).get("skill"));
   const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<string[]>(() =>
@@ -291,6 +304,20 @@ export function ChatPage() {
   const dragDepthRef = useRef(0);
   const workspaceResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const workspaceWidthRef = useRef(workspaceWidth);
+  const draftsRef = useRef(new Map<string, ConversationDraft>());
+  const messagesOwnerRef = useRef<string | null>(null);
+  const workspacePreview = useMemo(
+    () => workspaceTabs.find((tab) => previewKeyOf(tab) === activePreviewKey) ?? null,
+    [workspaceTabs, activePreviewKey]
+  );
+
+  useEffect(() => {
+    if (!activePreviewKey) return;
+    if (workspaceTabs.some((tab) => previewKeyOf(tab) === activePreviewKey)) return;
+    // 关掉当前标签页时回到最后一个仍打开的预览，和浏览器行为一致。
+    const fallback = workspaceTabs[workspaceTabs.length - 1];
+    setActivePreviewKey(fallback ? previewKeyOf(fallback) : null);
+  }, [workspaceTabs, activePreviewKey]);
 
   const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, refetchInterval: 30_000 });
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 30_000 });
@@ -577,7 +604,14 @@ export function ChatPage() {
 
   useEffect(() => {
     if (!conversationQuery.data || sending) return;
+    const owner = conversationQuery.data.conversation.id;
     const nextMessages = conversationQuery.data.messages;
+    // 换会话时必须整段替换：旧逻辑用“谁更长留谁”，切到消息更少的会话会残留上一个会话的内容。
+    if (messagesOwnerRef.current !== owner) {
+      messagesOwnerRef.current = owner;
+      setMessages(nextMessages);
+      return;
+    }
     setMessages((prev) => (nextMessages.length >= prev.length ? nextMessages : prev));
   }, [conversationQuery.data, sending]);
 
@@ -615,7 +649,8 @@ export function ChatPage() {
     if (panelConversationRef.current === conversationId) return;
     panelConversationRef.current = conversationId;
     setPanelOpen(false);
-    setWorkspacePreview(null);
+    setWorkspaceTabs([]);
+    setActivePreviewKey(null);
   }, [conversationId]);
 
   useEffect(() => {
@@ -681,16 +716,37 @@ export function ChatPage() {
   }, []);
 
   function resetConversationView(id: string | null) {
+    const previousId = conversationIdRef.current;
+    if (previousId !== id) {
+      // 输入框、附件和本轮技能/MCP 都属于具体会话，切走时存档、切回时还原。
+      if (previousId) {
+        draftsRef.current.set(previousId, {
+          input,
+          attachments,
+          skillId: selectedSkillId,
+          mcpServerIds: selectedMcpServerIds
+        });
+      }
+      const draft = id ? draftsRef.current.get(id) ?? null : null;
+      setInput(draft?.input ?? "");
+      setAttachments(draft?.attachments ?? []);
+      setSelectedSkillId(draft?.skillId ?? null);
+      setSelectedMcpServerIds(draft?.mcpServerIds ?? []);
+      // 待发送队列绑定的是旧会话，留着会把消息发错地方。
+      setQueue([]);
+    }
     setConversationId(id);
     conversationIdRef.current = id;
     setMessages([]);
+    messagesOwnerRef.current = null;
     setLiveRuns([]);
     setStreaming("");
     setStreamingStatus("");
     setReasoning("");
     setDraftSettings(null);
     setContextUsage(null);
-    setWorkspacePreview(null);
+    setWorkspaceTabs([]);
+    setActivePreviewKey(null);
     setDraggingFiles(false);
     dragDepthRef.current = 0;
     setModelMenuOpen(false);
@@ -756,8 +812,18 @@ export function ChatPage() {
   }
 
   const openPreview = useCallback((preview: PreviewTarget) => {
-    setWorkspacePreview(preview);
+    const key = previewKeyOf(preview);
+    setWorkspaceTabs((current) => {
+      if (current.some((tab) => previewKeyOf(tab) === key)) return current;
+      // 预览像编辑器一样多开，最多保留 8 个标签，超出时淘汰最早的。
+      return [...current, preview].slice(-8);
+    });
+    setActivePreviewKey(key);
     setPanelOpen(true);
+  }, []);
+
+  const closePreview = useCallback((key: string) => {
+    setWorkspaceTabs((current) => current.filter((tab) => previewKeyOf(tab) !== key));
   }, []);
 
   function patchSettings(patch: ConversationSettingsPatch) {
@@ -1852,7 +1918,20 @@ export function ChatPage() {
       className={`chat-layout ${panelOpen ? "with-workspace" : ""}`}
       style={panelOpen ? { gridTemplateColumns: `minmax(0, 1fr) ${workspaceWidth}px` } : undefined}
     >
-      <section className="chat-main">
+      <section
+        className={`chat-main${draggingFiles ? " drag-active" : ""}`}
+        onDragEnter={onComposerDragEnter}
+        onDragOver={onComposerDragOver}
+        onDragLeave={onComposerDragLeave}
+        onDrop={onComposerDrop}
+      >
+        {draggingFiles && (
+          <div className="chat-drop-overlay" role="status" aria-live="polite">
+            <Paperclip size={22} />
+            <strong>松开即可添加到当前会话</strong>
+            <span>支持 Markdown、PDF、图片等任意文件，单文件不超过 25 MB</span>
+          </div>
+        )}
         <header className="chat-header">
           <div className="chat-title-group">
             <span className="chat-header-mark" aria-hidden="true"><Folder size={16} /></span>
@@ -1964,20 +2043,7 @@ export function ChatPage() {
           </div>
         </div>
 
-        <div
-          className={`composer-wrap ${draggingFiles ? "drag-active" : ""}`}
-          onDragEnter={onComposerDragEnter}
-          onDragOver={onComposerDragOver}
-          onDragLeave={onComposerDragLeave}
-          onDrop={onComposerDrop}
-        >
-          {draggingFiles && (
-            <div className="composer-drop-overlay" role="status" aria-live="polite">
-              <Paperclip size={20} />
-              <strong>松开即可添加附件</strong>
-              <span>支持图片、文档和任意文件，单文件不超过 25 MB</span>
-            </div>
-          )}
+        <div className="composer-wrap">
           {!conversationId && projects.length > 0 && (
             <div className="composer-project-row">
               <label className="composer-project">
@@ -2613,9 +2679,18 @@ export function ChatPage() {
           {attachments.length > 0 && (
             <div className="attachment-row">
               {attachments.map((attachment) => (
-                <span key={attachment.id} className="attachment-chip">
+                <span key={attachment.id} className={`attachment-chip${isImageAttachment(attachment) ? " with-thumb" : ""}`}>
                   <button type="button" className="attachment-open" onClick={() => openPreview(attachmentPreviewTarget(attachment))} title="在侧边栏预览">
-                    <FileText size={13} />
+                    {isImageAttachment(attachment) ? (
+                      <img
+                        className="attachment-thumb"
+                        src={api.attachmentUrl(attachment.id)}
+                        alt={attachment.name}
+                        loading="lazy"
+                      />
+                    ) : (
+                      <FileText size={13} />
+                    )}
                     <span>{attachment.name}</span>
                     <small>{formatBytes(attachment.bytes)}</small>
                   </button>
@@ -2832,7 +2907,12 @@ export function ChatPage() {
               messages={messages}
               tasks={conversationTasks}
               preview={workspacePreview}
-              onPreviewChange={setWorkspacePreview}
+              tabs={workspaceTabs}
+              activeKey={activePreviewKey}
+              onSelectTab={setActivePreviewKey}
+              onCloseTab={closePreview}
+              onShowList={() => setActivePreviewKey(null)}
+              onOpenPreview={openPreview}
               onOpen={openWorkspace}
               onClose={closeWorkspace}
             />
@@ -2909,6 +2989,35 @@ function isTaskNoise(message: ChatMessageRecord): boolean {
   return message.content.startsWith("已派出任务：");
 }
 
+function isImageAttachment(attachment: Pick<ChatAttachment, "name" | "mimeType">): boolean {
+  if (attachment.mimeType.toLowerCase().startsWith("image/")) return true;
+  return /\.(png|jpe?g|gif|webp|bmp|avif|ico)$/i.test(attachment.name);
+}
+
+/** 图片附件直接给出缩略图，不再只显示文件名。 */
+function MessageAttachmentChip({
+  attachment,
+  onPreview
+}: {
+  attachment: ChatAttachment;
+  onPreview: (preview: PreviewTarget) => void;
+}) {
+  const image = isImageAttachment(attachment);
+  return (
+    <button
+      type="button"
+      className={`message-attachment${image ? " with-thumb" : ""}`}
+      onClick={() => onPreview(attachmentPreviewTarget(attachment))}
+      title={`${attachment.name} · ${formatBytes(attachment.bytes)} · 在侧边栏预览`}
+    >
+      {image
+        ? <img className="message-attachment-thumb" src={api.attachmentUrl(attachment.id)} alt={attachment.name} loading="lazy" />
+        : <FileText size={12} />}
+      <span>{attachment.name}</span>
+    </button>
+  );
+}
+
 const ChatBubble = memo(function ChatBubble({
   message,
   execution,
@@ -2927,15 +3036,7 @@ const ChatBubble = memo(function ChatBubble({
           {message.attachments.length > 0 && (
             <div className="message-attachments">
               {message.attachments.map((attachment) => (
-                <button
-                  key={attachment.id}
-                  type="button"
-                  className="message-attachment"
-                  onClick={() => onPreview(attachmentPreviewTarget(attachment))}
-                  title="在侧边栏预览"
-                >
-                  <FileText size={12} /> {attachment.name}
-                </button>
+                <MessageAttachmentChip key={attachment.id} attachment={attachment} onPreview={onPreview} />
               ))}
             </div>
           )}
@@ -2954,15 +3055,7 @@ const ChatBubble = memo(function ChatBubble({
       {message.attachments.length > 0 && (
         <div className="message-attachments assistant-attachments">
           {message.attachments.map((attachment) => (
-            <button
-              key={attachment.id}
-              type="button"
-              className="message-attachment"
-              onClick={() => onPreview(attachmentPreviewTarget(attachment))}
-              title="在侧边栏预览或下载"
-            >
-              <FileText size={12} /> {attachment.name}
-            </button>
+            <MessageAttachmentChip key={attachment.id} attachment={attachment} onPreview={onPreview} />
           ))}
         </div>
       )}

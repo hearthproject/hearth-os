@@ -73,6 +73,73 @@
   white-space: nowrap;
 }
 
+.workspace-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sunk);
+}
+
+.workspace-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 220px;
+  padding: 2px 3px 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
+.workspace-tab.active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+}
+
+.workspace-tab-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: var(--fs-11);
+  cursor: pointer;
+}
+
+.workspace-tab-main > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-tab.active .workspace-tab-main {
+  color: var(--ink);
+}
+
+.workspace-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+}
+
+.workspace-tab-close:hover {
+  background: color-mix(in srgb, var(--risk) 14%, transparent);
+  color: var(--risk);
+}
+
 .workspace-head-mark {
   flex: 0 0 auto;
   color: var(--ink-tertiary);
@@ -263,9 +330,19 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--ink-secondary);
+  font: inherit;
   font-size: 10px;
   text-decoration: none;
+  cursor: pointer;
+}
+
+.workspace-preview-link:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .workspace-preview-link:hover {
