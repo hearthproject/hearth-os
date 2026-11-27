@@ -915,6 +915,28 @@
   margin-top: 12px;
 }
 
+.executor-team-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-subtle);
+}
+
+.executor-team-detail {
+  flex: 1 1 240px;
+  color: var(--ink-tertiary);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.executor-team-hint {
+  color: var(--ink-tertiary);
+  font-size: 10px;
+}
+
 .executor-row-controls > label {
   flex: 1 1 320px;
 }

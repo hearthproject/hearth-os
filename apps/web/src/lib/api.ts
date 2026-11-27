@@ -23,6 +23,7 @@ import type {
   ExecutorProbeResult,
   ExecutorSettingsPatch,
   ExecutorSettingsResponse,
+  ExecutorTeamCapability,
   EventEnvelope,
   HealthResponse,
   FolderBrowseResult,
@@ -344,6 +345,10 @@ export const api = {
     body: JSON.stringify(input)
   }),
   probeExecutor: (id: ExecutorId) => request<ExecutorProbeResult>(`/api/executors/${encodeURIComponent(id)}/probe`, { method: "POST" }),
+  installTeamRuntime: (id: ExecutorId) => request<{
+    result: { installed: boolean; path: string | null; message: string };
+    capability: ExecutorTeamCapability;
+  }>(`/api/executors/${encodeURIComponent(id)}/team-runtime`, { method: "POST" }),
   schedules: () => request<ScheduleSnapshot>("/api/schedules"),
   createSchedule: (input: ScheduleInput) => request<ScheduleRecord>("/api/schedules", {
     method: "POST",

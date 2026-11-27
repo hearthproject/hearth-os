@@ -1801,6 +1801,40 @@ export function ChatPage() {
     staleTime: 5 * 60_000
   });
   const capability = capabilityQuery.data?.capability ?? null;
+  const teamCapability = selectedExecutor?.teamCapability ?? null;
+  const teamUnavailable = Boolean(teamCapability && (teamCapability.state === "unavailable" || teamCapability.state === "probe_failed"));
+  const teamOwnerLabel = teamCapability?.owner === "hearth"
+    ? "Hearth 编排"
+    : teamCapability?.owner === "codex"
+      ? "Codex 原生"
+      : teamCapability?.owner === "deepseek-harness"
+        ? "DSH 原生"
+        : "不可用";
+  const teamModeLabel = conversationSettings.agentMode === "team"
+    ? planMode
+      ? "团队 · 计划模式固定单 Agent"
+      : `团队 · ${teamOwnerLabel}`
+    : "单 Agent";
+  const teamNote = teamUnavailable
+    ? `团队不可用：${teamCapability?.reason ?? "当前执行器不支持原生团队"}`
+    : conversationSettings.agentMode === "team"
+      ? planMode
+        ? "计划模式固定单 Agent，团队开关不会生效；切回构建模式后恢复。"
+        : teamCapability?.owner === "codex"
+          ? `Codex 团队已开启，但成员与用量不可见（仅总量）；Codex 内部成员继承 Codex 权限。`
+          : teamCapability?.owner === "deepseek-harness"
+            ? "DSH 团队已开启；成员共享工作区，写作用域是建议性的，不是锁。"
+            : "Hearth 创建只读成员（4 并发 / 8 累计 / 深度 2），按任务复杂度决定是否真的拆分。"
+      : null;
+  const teamToggleDisabled = !settingsReady
+    || (conversationSettings.agentMode === "single" && (planMode || teamUnavailable));
+  const installTeamMutation = useMutation({
+    mutationFn: () => api.installTeamRuntime(selectedExecutorId as ExecutorId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["executors"] });
+    },
+    onError: (caught) => setError(caught instanceof Error ? caught.message : "团队运行时安装失败")
+  });
   const selectedBinding = selectedExecutor?.modelBinding
     ?? modelRegistryQuery.data?.bindings.find((binding) => binding.executorId === selectedExecutorId)
     ?? null;
@@ -2269,19 +2303,37 @@ export function ChatPage() {
             )}
             <button
               type="button"
-              className={`composer-agent-mode ${conversationSettings.agentMode === "team" ? "team" : "single"}`}
+              className={`composer-agent-mode ${conversationSettings.agentMode === "team" ? "team" : "single"}${teamUnavailable ? " unavailable" : ""}`}
               onClick={toggleAgentMode}
-              disabled={!settingsReady}
+              disabled={teamToggleDisabled}
               aria-pressed={conversationSettings.agentMode === "team"}
               title={conversationSettings.agentMode === "team"
-                ? "团队模式：只读成员并行调查与审查，token 开销更高；仅 Native 由 Hearth 编排。点击切回单 Agent。"
-                : "单 Agent 模式：不注入委派工具，成本与延迟最低。点击切换到团队模式。"}
+                ? `${teamNote ?? "团队模式"} 点击切回单 Agent。`
+                : teamUnavailable
+                  ? `当前执行器团队不可用：${teamCapability?.reason ?? "未知原因"}`
+                  : "单 Agent 模式：不注入委派工具，成本与延迟最低。点击切换到团队模式。"}
             >
               <Users size={13} />
-              <span>{conversationSettings.agentMode === "team" ? "团队" : "单 Agent"}</span>
+              <span>{teamModeLabel}</span>
             </button>
-            {conversationSettings.agentMode === "team" && selectedExecutorId !== "native" && (
-              <span className="composer-agent-mode-note">该执行器自行管理多 agent，Hearth 编排仅对 Native 生效</span>
+            {teamNote && (
+              <span className="composer-agent-mode-note">
+                {teamNote}
+                {teamCapability?.repair === "install-team-runtime" && (
+                  <button
+                    type="button"
+                    className="composer-agent-mode-action"
+                    onClick={() => installTeamMutation.mutate()}
+                    disabled={installTeamMutation.isPending}
+                  >
+                    {installTeamMutation.isPending ? <Loader2 size={11} className="spin" /> : null}
+                    {installTeamMutation.isPending ? "安装中" : "安装团队运行时"}
+                  </button>
+                )}
+                {teamCapability?.repair === "update-executor" && (
+                  <a className="composer-agent-mode-action" href="#executors">更新执行器</a>
+                )}
+              </span>
             )}
           </div>
           {skillNotice && (

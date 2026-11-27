@@ -9,12 +9,12 @@ import {
   RefreshCw,
   Wrench
 } from "lucide-react";
-import type { ExecutorId, ExecutorModelBindingView, ExecutorProbeResult, ExecutorView, TaskFollowUpMode } from "../lib/types.ts";
+import type { ExecutorId, ExecutorModelBindingView, ExecutorProbeResult, ExecutorTeamCapability, ExecutorView, TaskFollowUpMode } from "../lib/types.ts";
 import { api } from "../lib/api.ts";
 import { ExecutorBootstrapStatus } from "./ExecutorBootstrapStatus.tsx";
 import { useExecutorBootstrap } from "../lib/use-executor-bootstrap.ts";
 
-type Busy = `probe:${ExecutorId}` | `bootstrap:${ExecutorId}` | `bind:${ExecutorId}` | "settings" | null;
+type Busy = `probe:${ExecutorId}` | `bootstrap:${ExecutorId}` | `bind:${ExecutorId}` | `team:${ExecutorId}` | "settings" | null;
 type Notice = { tone: "ok" | "error" | "info"; text: string } | null;
 
 const EXECUTOR_LABELS: Record<ExecutorId, string> = {
@@ -113,8 +113,21 @@ export function ExecutorSettingsPanel() {
     }
   }
 
-  async function probe(executorId: ExecutorId) {
-    setBusy(`probe:${executorId}`);
+  async function installTeam(executorId: ExecutorId) {
+    setBusy(`team:${executorId}`);
+    setNotice({ tone: "info", text: "正在安装团队运行时，请保持设置页打开。" });
+    try {
+      const result = await api.installTeamRuntime(executorId);
+      setNotice({ tone: "ok", text: result.result.message });
+      await refreshAll();
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "团队运行时安装失败" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function probe(executorId: ExecutorId) {    setBusy(`probe:${executorId}`);
     setNotice(null);
     try {
       const result = await api.probeExecutor(executorId);
@@ -214,7 +227,9 @@ export function ExecutorSettingsPanel() {
           const detected = executor.id === "native" || executor.health.installState !== "missing";
           const status = bindingStatus(binding, executor);
           const needsSetup = executor.id !== "native" && (!executor.health.canRun || !binding?.available);
-          const rowBusy = busy === `bind:${executor.id}` || busy === `probe:${executor.id}` || busy === `bootstrap:${executor.id}`;
+          const rowBusy = busy === `bind:${executor.id}` || busy === `probe:${executor.id}` || busy === `bootstrap:${executor.id}` || busy === `team:${executor.id}`;
+          const teamCapability = executor.teamCapability;
+          const teamStatus = teamCapability ? teamCapabilityStatus(teamCapability.state) : null;
 
           return (
             <article className="executor-row" key={executor.id}>
@@ -231,6 +246,25 @@ export function ExecutorSettingsPanel() {
                   {status.label}
                 </span>
               </div>
+
+              {teamCapability && teamStatus && (
+                <div className="executor-team-row">
+                  <span className={`status-chip ${teamStatus.tone}`}>
+                    <span className={`status-dot ${teamStatus.dot}`} />
+                    团队 · {teamStatus.label}
+                  </span>
+                  <span className="executor-team-detail">{teamCapabilityDescription(teamCapability, executor.id)}</span>
+                  {teamCapability.repair === "install-team-runtime" && (
+                    <button type="button" className="ghost-button compact" onClick={() => void installTeam(executor.id)} disabled={busy !== null}>
+                      {busy === `team:${executor.id}` ? <Loader2 size={13} className="spin" /> : <Download size={13} />}
+                      安装团队运行时
+                    </button>
+                  )}
+                  {teamCapability.repair === "update-executor" && (
+                    <span className="executor-team-hint">更新执行器后可用</span>
+                  )}
+                </div>
+              )}
 
               <div className="executor-row-controls">
                 <label>
@@ -304,8 +338,31 @@ export function ExecutorSettingsPanel() {
   );
 }
 
-function bindingStatus(binding: ExecutorModelBindingView | undefined, executor: ExecutorView) {
-  if (!binding?.profileId) return { tone: "warn", dot: "idle", label: "未绑定" };
+function teamCapabilityStatus(state: ExecutorTeamCapability["state"]): { tone: "ok" | "warn"; dot: "online" | "offline" | "idle"; label: string } {
+  if (state === "available") return { tone: "ok", dot: "online", label: "可用" };
+  if (state === "probe_failed") return { tone: "warn", dot: "idle", label: "无法确认" };
+  return { tone: "warn", dot: "offline", label: "不可用" };
+}
+
+function teamCapabilityDescription(capability: ExecutorTeamCapability, executorId: ExecutorId): string {
+  if (capability.state === "unavailable" || capability.state === "probe_failed") {
+    return capability.reason ?? "当前执行器不支持原生团队";
+  }
+  const owner = executorId === "native" ? "Hearth 编排" : executorId === "codex" ? "Codex 原生" : "DSH 原生";
+  const visibility = capability.visibility === "members"
+    ? "成员可见"
+    : capability.visibility === "session-tree"
+      ? "会话树可见"
+      : "成员不可见";
+  const limit = capability.limits
+    ? capability.limits.maxDepth !== undefined
+      ? `${capability.limits.maxConcurrent} 并发 / ${capability.limits.maxTotal} 累计 / 深度 ${capability.limits.maxDepth}`
+      : `${capability.limits.maxConcurrent} 成员`
+    : "";
+  return [owner, visibility, limit].filter(Boolean).join(" · ");
+}
+
+function bindingStatus(binding: ExecutorModelBindingView | undefined, executor: ExecutorView) {  if (!binding?.profileId) return { tone: "warn", dot: "idle", label: "未绑定" };
   if (binding.issue) return { tone: "warn", dot: "offline", label: binding.issue };
   if (!executor.health.canRun) {
     const label = executor.health.installState === "missing"
