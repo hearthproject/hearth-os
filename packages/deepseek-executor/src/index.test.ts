@@ -1,7 +1,11 @@
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { HarnessNotification } from "@deepseek-ai/dsh-sdk-client";
 import {
   buildDshPatch,
+  clearStaleCredentialLocks,
   dshPermissionMode,
   ordinaryQuestionMarkdown,
   planReviewMarkdown,
@@ -36,6 +40,24 @@ describe("runDeepSeekHarness runtime loading", () => {
     await expect(runDeepSeekHarness(options({ model: "" }))).rejects.toMatchObject({
       code: "DSH_MODEL_INCOMPLETE"
     });
+  });
+});
+
+describe("clearStaleCredentialLocks", () => {
+  it("removes a lock owned by a dead process but keeps a live owner", () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-dsh-lock-"));
+    try {
+      writeFileSync(join(root, ".credentials.yaml.lock"), "99999999");
+      writeFileSync(join(root, ".credentials.yaml.lock.takeover-dead"), "99999998");
+      clearStaleCredentialLocks(root);
+      expect(readdirSync(root).filter((name) => name.startsWith(".credentials.yaml.lock"))).toEqual([]);
+
+      writeFileSync(join(root, ".credentials.yaml.lock"), String(process.pid));
+      clearStaleCredentialLocks(root);
+      expect(readdirSync(root)).toContain(".credentials.yaml.lock");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

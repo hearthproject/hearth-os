@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -141,6 +141,8 @@ async function loadDeepSeekHarness(dshHome?: string): Promise<typeof import("@de
 
 const API_KEY_ENV = "HEARTH_DSH_API_KEY";
 const PROVIDER = "hearth";
+/** Team plugins cold-load on first launch and routinely exceed the SDK's 10s default. */
+const DSH_INITIALIZE_TIMEOUT_MS = 45_000;
 const API_BY_PROTOCOL: Record<DshProtocol, string> = {
   "openai-chat": "openai-completions",
   "openai-responses": "openai-responses",
@@ -152,6 +154,7 @@ export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Pr
   validateSettings(options.settings);
   mkdirSync(options.dshHome, { recursive: true });
   const patchPath = writeProviderPatch(options.dshHome, options.settings, options.mcpServers, options.agentTeam);
+  clearStaleCredentialLocks(options.dshHome);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     [API_KEY_ENV]: options.settings.apiKey,
@@ -171,6 +174,7 @@ export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Pr
     model: options.settings.model,
     maxTokens: 32_768,
     approvalRequests: true,
+    initializeTimeoutMs: DSH_INITIALIZE_TIMEOUT_MS,
     ...(options.runBudgetSeconds !== undefined
       ? { requestTimeoutMs: Math.max(60_000, options.runBudgetSeconds * 1_000) }
       : {}),
@@ -249,6 +253,43 @@ export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Pr
 
 export function dshHomeFor(settingsPath: string): string {
   return join(settingsPath, "deepseek-harness");
+}
+
+/**
+ * DSH leaves `.credentials.yaml.lock*` behind even after a clean SDK shutdown.
+ * Every next process then spends its initialize budget taking over a dead lock.
+ * Remove locks only when their owning PID is gone, so concurrent runs stay safe.
+ */
+export function clearStaleCredentialLocks(dshHome: string): void {
+  const lockPath = join(dshHome, ".credentials.yaml.lock");
+  if (!existsSync(lockPath)) return;
+  const owner = Number(readFileSync(lockPath, "utf8").trim());
+  if (!Number.isInteger(owner) || owner <= 0 || processAlive(owner)) return;
+  for (const entry of readdirSync(dshHome)) {
+    if (!entry.startsWith(".credentials.yaml.lock")) continue;
+    const path = join(dshHome, entry);
+    let lockOwner = Number.NaN;
+    try {
+      lockOwner = Number(readFileSync(path, "utf8").trim());
+    } catch {
+      continue;
+    }
+    if (Number.isInteger(lockOwner) && lockOwner > 0 && processAlive(lockOwner)) continue;
+    try {
+      unlinkSync(path);
+    } catch {
+      // Another process may have removed the lock between readdir and unlink.
+    }
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 async function runResumed(harness: DeepSeekHarness, options: DeepSeekHarnessRunOptions): Promise<RunResult> {
