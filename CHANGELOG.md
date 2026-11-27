@@ -28,6 +28,11 @@
 - 取消写 `cancelled` 而不是 failed；进程重启后 lost 成员补发一次 `subagent.failed`，界面不再永久转圈。
 - 成员事件带 `source` / `parentId` / `depth` / `structured`，roster 按 Hearth、Codex、DSH 分组；无成员时按执行器显示不同空态。
 
+### 兜底与限制
+
+- `todo_write` 超过 30 条时现在显式报错（`isError`），不再静默截断；schema 同步声明 `maxItems: 30`。
+- 子代理停滞 60 分钟无进展时自动取消并回收累计委派槽位，同时保留 `agent_send/agent_resume` 恢复路径；60 分钟前仍会发出停滞通知。
+
 ### 修复
 
 - 修复 0.8.0 计划模式重置工具面后仍保留团队策略的问题。

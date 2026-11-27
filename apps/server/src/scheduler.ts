@@ -2753,11 +2753,8 @@ export class HearthScheduler {
           });
           this.service.bus.publish(event);
         }
-        const usedSubagents = this.service.store.listEvents(0, task.id)
-          .filter((event) => event.type === "subagent.delegated").length;
         const remainingSubagents = Math.max(0, Math.min(
           MAX_SUBAGENTS,
-          MAX_TOTAL_SUBAGENTS - usedSubagents,
           manager.remainingTotal()
         ));
         const subagentTool = process.env.HEARTH_AGENT_TOOL === "0" ? createSubagentTool : createAgentTool;

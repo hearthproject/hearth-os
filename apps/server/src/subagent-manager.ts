@@ -47,6 +47,8 @@ export interface ManagedAgent {
   stallNotices?: Set<number> | undefined;
   /** Lost jobs are announced to the conversation exactly once. */
   lossAnnounced?: boolean | undefined;
+  /** Auto-cancelled after stalling too long; does not consume cumulative total slots. */
+  stallAutoCancelled?: boolean | undefined;
 }
 
 export interface ManagedAgentView {
@@ -62,6 +64,7 @@ export interface ManagedAgentView {
 }
 
 const STALL_THRESHOLDS_MS = [15 * 60_000, 30 * 60_000, 60 * 60_000, 4 * 60 * 60_000];
+const STALL_AUTO_CANCEL_MS = 60 * 60_000;
 
 export class SubagentTaskManager {
   private readonly jobs = new Map<string, ManagedAgent>();
@@ -78,8 +81,20 @@ export class SubagentTaskManager {
     this.resumeHandler = handler;
   }
 
+  private countsTowardTotal(job: ManagedAgent): boolean {
+    return job.stallAutoCancelled !== true;
+  }
+
+  private usedTotal(): number {
+    let count = 0;
+    for (const job of this.jobs.values()) {
+      if (this.countsTowardTotal(job)) count += 1;
+    }
+    return count;
+  }
+
   remainingTotal(): number {
-    return Math.max(0, this.maxTotal - this.jobs.size);
+    return Math.max(0, this.maxTotal - this.usedTotal());
   }
 
   takeNotifications(): AgentMessage[] {
@@ -110,7 +125,7 @@ export class SubagentTaskManager {
   ): ManagedAgent {
     const running = [...this.jobs.values()].filter((job) => job.status === "running").length;
     if (running >= this.maxConcurrent) throw new Error(`同时最多运行 ${this.maxConcurrent} 个子代理`);
-    if (this.jobs.size >= this.maxTotal) throw new Error(`子代理总数最多 ${this.maxTotal} 个`);
+    if (this.usedTotal() >= this.maxTotal) throw new Error(`子代理总数最多 ${this.maxTotal} 个`);
     const id = input.id;
     if (this.jobs.has(id)) throw new Error(`子代理 ID 已存在：${id}`);
     const now = new Date().toISOString();
@@ -157,6 +172,9 @@ export class SubagentTaskManager {
     }
     if (!job.resume) throw new Error(requireResumable ? `子代理没有可恢复的会话：${id}` : `子代理无法恢复：${id}`);
     const now = new Date().toISOString();
+    const running = [...this.jobs.values()].filter((item) => item.status === "running" && item.id !== job.id).length;
+    if (running >= this.maxConcurrent) throw new Error(`同时最多运行 ${this.maxConcurrent} 个子代理`);
+    if (job.stallAutoCancelled && this.usedTotal() >= this.maxTotal) throw new Error(`子代理总数最多 ${this.maxTotal} 个`);
     job.controller = new AbortController();
     job.status = "running";
     job.endedAt = null;
@@ -164,6 +182,7 @@ export class SubagentTaskManager {
     job.error = null;
     job.result = null;
     job.stallNotices = new Set();
+    job.stallAutoCancelled = false;
     job.promise = this.attach(job, job.resume(text, job.controller.signal));
     job.promise.catch(() => undefined);
     this.persist();
@@ -177,10 +196,26 @@ export class SubagentTaskManager {
       for (const threshold of STALL_THRESHOLDS_MS) {
         if (elapsed < threshold || job.stallNotices?.has(threshold)) continue;
         job.stallNotices?.add(threshold);
+        if (threshold < STALL_AUTO_CANCEL_MS) {
+          this.notifications.push({
+            role: "user",
+            content: `<subagent_notification>\nagentId: ${job.id}\ntype: ${job.type}\nstatus: running\nstall: ${Math.round(elapsed / 60_000)} minutes without progress\nsummary: 子代理可能停滞；可用 agent_status 检查，或 agent_kill 后通过 sendMessage 续跑。若继续无进展，将在 ${Math.round(STALL_AUTO_CANCEL_MS / 60_000)} 分钟后自动取消并回收槽位。\n</subagent_notification>`
+          });
+        }
+      }
+      if (elapsed >= STALL_AUTO_CANCEL_MS && job.stallAutoCancelled !== true) {
+        const minutes = Math.round(elapsed / 60_000);
+        job.stallAutoCancelled = true;
+        job.controller.abort();
+        job.status = "cancelled";
+        job.error = `子代理停滞 ${minutes} 分钟无进展，已自动取消并回收委派槽位；可用 agent_send/agent_resume 继续，或由 Lead 直接接管。`;
+        job.endedAt = new Date().toISOString();
+        job.lastProgressAt = job.endedAt;
         this.notifications.push({
           role: "user",
-          content: `<subagent_notification>\nagentId: ${job.id}\ntype: ${job.type}\nstatus: running\nstall: ${Math.round(elapsed / 60_000)} minutes without progress\nsummary: 子代理可能停滞；可用 agent_status 检查，或 agent_kill 后通过 sendMessage 续跑。\n</subagent_notification>`
+          content: `<subagent_notification>\nagentId: ${job.id}\ntype: ${job.type}\nstatus: cancelled\nstall: ${minutes} minutes without progress\nsummary: ${job.error}\n</subagent_notification>`
         });
+        this.persist();
       }
     }
     return this.takeNotifications();
@@ -189,6 +224,7 @@ export class SubagentTaskManager {
   private attach(job: ManagedAgent, promise: Promise<AgentToolResult>): Promise<AgentToolResult> {
     return promise
       .then((result) => {
+        if (job.stallAutoCancelled) return result;
         const memberStatus = (result.metadata as Record<string, unknown> | undefined)?.agentStatus;
         job.result = result;
         job.status = job.controller.signal.aborted
@@ -201,6 +237,7 @@ export class SubagentTaskManager {
         return result;
       })
       .catch((error) => {
+        if (job.stallAutoCancelled) throw error;
         job.error = error instanceof Error ? error.message : String(error);
         job.status = job.controller.signal.aborted ? "cancelled" : "failed";
         job.lastProgressAt = new Date().toISOString();
@@ -208,7 +245,7 @@ export class SubagentTaskManager {
         throw error;
       })
       .finally(() => {
-        job.endedAt = new Date().toISOString();
+        if (!job.endedAt) job.endedAt = new Date().toISOString();
         this.persist();
       });
   }
@@ -282,6 +319,7 @@ export class SubagentTaskManager {
         sessionId: job.sessionId,
         error: job.error,
         lossAnnounced: job.lossAnnounced === true,
+        stallAutoCancelled: job.stallAutoCancelled === true,
         ...(job.session ? { session: job.session } : {}),
         ...(job.checkpointPath ? { checkpointPath: job.checkpointPath } : {}),
         ...(job.journalPath ? { journalPath: job.journalPath } : {})
@@ -320,7 +358,8 @@ export class SubagentTaskManager {
           ...(typeof entry.checkpointPath === "string" ? { checkpointPath: entry.checkpointPath } : {}),
           ...(typeof entry.journalPath === "string" ? { journalPath: entry.journalPath } : {}),
           stallNotices: new Set(),
-          lossAnnounced: entry.lossAnnounced === true
+          lossAnnounced: entry.lossAnnounced === true,
+          stallAutoCancelled: status === "lost" ? false : entry.stallAutoCancelled === true
         };
         this.jobs.set(job.id, job);
       }

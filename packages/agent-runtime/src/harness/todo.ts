@@ -1,17 +1,20 @@
 import type { AgentTodo, AgentTool, AgentToolContext, AgentToolResult } from "../types.ts";
 import { syncPlanFromTodos } from "./plan-state.ts";
 
+export const MAX_TODOS = 30;
+
 export const todoWriteTool: AgentTool = {
   definition: {
     name: "todo_write",
-    description: "Create or replace the task's todo list. Use it to track multi-step work (coding, data, documents or research) and keep statuses current.",
+    description: `Create or replace the task's todo list. Use it to track multi-step work (coding, data, documents or research) and keep statuses current. At most ${MAX_TODOS} items; split larger work into subtasks or higher-level steps.`,
     executionMode: "sequential",
     parameters: {
       type: "object",
       properties: {
         todos: {
           type: "array",
-          description: "The full todo list, in order. Replaces the previous list.",
+          maxItems: MAX_TODOS,
+          description: `The full todo list, in order. Replaces the previous list. Maximum ${MAX_TODOS} items.`,
           items: {
             type: "object",
             properties: {
@@ -31,8 +34,14 @@ export const todoWriteTool: AgentTool = {
   async execute(input: unknown, context: AgentToolContext): Promise<AgentToolResult> {
     const record = input && typeof input === "object" ? input as Record<string, unknown> : {};
     const raw = Array.isArray(record.todos) ? record.todos : [];
+    if (raw.length > MAX_TODOS) {
+      return {
+        content: `todo 数量超过 ${MAX_TODOS} 条（当前 ${raw.length} 条）。请拆成更高层级的步骤，或拆分子任务后再写入。`,
+        isError: true
+      };
+    }
     const todos: AgentTodo[] = [];
-    for (const item of raw.slice(0, 30)) {
+    for (const item of raw.slice(0, MAX_TODOS)) {
       if (!item || typeof item !== "object") continue;
       const value = item as Record<string, unknown>;
       const id = typeof value.id === "string" ? value.id.trim() : "";
