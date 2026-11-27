@@ -1141,7 +1141,12 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         { title: "核对结果并收尾" }
       ]));
       emitTodosIfChanged();
-      emit({ type: "notice", message: "模型未提交计划，运行时已生成最小执行计划以继续任务" });
+      emit({ type: "notice", message: "模型未提交计划，运行时已生成最小执行计划，等待你确认后再继续" });
+      const fallbackPlan = renderPlanContext(state.plan) ?? state.todos.map((todo) => `- ${todo.content}`).join("\n");
+      summary = fallbackPlan;
+      await checkpoint("plan", true);
+      clearExecuting();
+      return finish("waiting_input", fallbackPlan, [], fallbackPlan, undefined, state.planPath ?? undefined, true);
     }
 
     const assistantMessage: AgentMessage = { role: "assistant", content: turn.content, toolCalls: turn.toolCalls };

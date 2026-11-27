@@ -1324,7 +1324,9 @@ describe("requirePlanFirst gate", () => {
       requirePlanFirst: true,
       onEvent: (event) => events.push(event)
     });
-    expect(result.status).toBe("completed");
+    expect(result.status).toBe("waiting_input");
+    expect(result.planSubmitted).toBe(true);
+    expect(result.summary).toContain("理解任务目标与输入");
     const updates = events.filter((event): event is Extract<RuntimeEvent, { type: "todos.updated" }> => event.type === "todos.updated");
     const latest = updates.at(-1);
     expect(latest).toBeDefined();
