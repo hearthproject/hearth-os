@@ -2472,3 +2472,44 @@
     transition: none;
   }
 }
+
+.composer-agent-mode {
+  order: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  cursor: pointer;
+}
+
+.composer-agent-mode:hover:not(:disabled) {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.composer-agent-mode.team {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--ink);
+}
+
+.composer-agent-mode:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.composer-agent-mode-note {
+  order: 2;
+  color: var(--ink-tertiary);
+  font-size: 10px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

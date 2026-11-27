@@ -33,6 +33,7 @@ import {
   Sparkles,
   Square,
   Trash2,
+  Users,
   X
 } from "lucide-react";
 import { ApiError, api, chatStream, type GoalSettingsInput } from "../lib/api.ts";
@@ -72,7 +73,8 @@ import type {
 const PENDING_SETTINGS: ConversationSettings = {
   executorEnabled: { native: true, codex: false, "deepseek-harness": false },
   approvalMode: "full",
-  preferredExecutorId: "native"
+  preferredExecutorId: "native",
+  agentMode: "single"
 };
 
 const WORKSPACE_WIDTH_KEY = "hearth.workspace-width";
@@ -835,6 +837,8 @@ export function ChatPage() {
       },
       approvalMode: "full",
       executionMode: patch.executionMode ?? conversationSettings.executionMode ?? "standard",
+      collaborationMode: patch.collaborationMode ?? conversationSettings.collaborationMode ?? "build",
+      agentMode: patch.agentMode ?? conversationSettings.agentMode ?? "single",
       preferredExecutorId: patch.preferredExecutorId !== undefined
         ? patch.preferredExecutorId
         : conversationSettings.preferredExecutorId
@@ -862,6 +866,11 @@ export function ChatPage() {
         void queryClient.invalidateQueries({ queryKey: ["conversations"] });
         void queryClient.invalidateQueries({ queryKey: ["conversation", id] });
       });
+  }
+
+  function toggleAgentMode() {
+    const next = conversationSettings.agentMode === "team" ? "single" : "team";
+    patchSettings({ agentMode: next });
   }
 
   function chooseExecutor(executorId: ExecutorId | "") {
@@ -2257,6 +2266,22 @@ export function ChatPage() {
             </label>
             {selectedExecutorUnavailable && (
               <span className="composer-executor-warning">{selectedExecutorName} 当前不可用，不会自动切换</span>
+            )}
+            <button
+              type="button"
+              className={`composer-agent-mode ${conversationSettings.agentMode === "team" ? "team" : "single"}`}
+              onClick={toggleAgentMode}
+              disabled={!settingsReady}
+              aria-pressed={conversationSettings.agentMode === "team"}
+              title={conversationSettings.agentMode === "team"
+                ? "团队模式：只读成员并行调查与审查，token 开销更高；仅 Native 由 Hearth 编排。点击切回单 Agent。"
+                : "单 Agent 模式：不注入委派工具，成本与延迟最低。点击切换到团队模式。"}
+            >
+              <Users size={13} />
+              <span>{conversationSettings.agentMode === "team" ? "团队" : "单 Agent"}</span>
+            </button>
+            {conversationSettings.agentMode === "team" && selectedExecutorId !== "native" && (
+              <span className="composer-agent-mode-note">该执行器自行管理多 agent，Hearth 编排仅对 Native 生效</span>
             )}
           </div>
           {skillNotice && (

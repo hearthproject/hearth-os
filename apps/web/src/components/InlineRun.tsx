@@ -12,6 +12,7 @@ import { api } from "../lib/api.ts";
 import { formatDuration } from "../lib/format.ts";
 import type { TaskProgressDetail, TaskStatus, TaskView } from "../lib/types.ts";
 import { ApprovalCard } from "./ApprovalCard.tsx";
+import { AgentRoster } from "./AgentRoster.tsx";
 import { BrowserTaskPanel } from "./BrowserTaskPanel.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { TaskStatusIcon } from "./TaskStatusIcon.tsx";
@@ -238,6 +239,7 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
 
           <BrowserTaskPanel taskId={task.id} />
           <TodoChecklist todos={todos} />
+          <AgentRoster events={view?.events ?? []} />
 
           {entries.length === 0 && active && (
             <p className="inline-run-muted"><Loader2 size={12} className="spin" /> 正在准备执行…</p>

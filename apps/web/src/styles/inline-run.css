@@ -704,3 +704,142 @@
     max-height: 180px;
   }
 }
+
+.inline-run-roster {
+  margin: 6px 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+  overflow: hidden;
+}
+
+.inline-run-roster-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 9px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.inline-run-roster-head strong {
+  font-weight: 600;
+}
+
+.inline-run-roster-count {
+  margin-left: auto;
+  color: var(--ink-tertiary);
+  font-size: 10px;
+}
+
+.inline-run-roster-list {
+  border-top: 1px solid var(--line);
+}
+
+.inline-run-agent {
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.inline-run-agent:last-child {
+  border-bottom: 0;
+}
+
+.inline-run-agent-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 9px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: 10.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.inline-run-agent-head:hover {
+  background: var(--surface);
+}
+
+.inline-run-agent-status {
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
+  color: var(--ink-tertiary);
+}
+
+.inline-run-agent-status.completed {
+  color: var(--ok);
+}
+
+.inline-run-agent-status.failed {
+  color: var(--risk);
+}
+
+.inline-run-agent-cancel {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.inline-run-agent-type {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--ink-tertiary);
+  font-size: 9.5px;
+  line-height: 16px;
+}
+
+.inline-run-agent-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.inline-run-agent-meta {
+  flex: none;
+  color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.inline-run-agent-detail {
+  padding: 2px 9px 9px 29px;
+  color: var(--ink-secondary);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.inline-run-agent-detail pre {
+  margin: 0 0 5px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink-secondary);
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.inline-run-agent-error {
+  margin: 0 0 5px;
+  color: var(--risk);
+}
+
+.inline-run-agent-path {
+  margin: 2px 0 0;
+  color: var(--ink-tertiary);
+  font-size: 9.5px;
+  word-break: break-all;
+}
