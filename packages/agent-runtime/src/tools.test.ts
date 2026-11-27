@@ -545,10 +545,14 @@ describe("builtin tools", () => {
   it("migrates a timed-out command to a killable background session", async () => {
     const root = workspace(roots);
     const out = join(root, "out");
-    const marker = join(root, "child-still-alive.txt");
+    const heartbeat = join(root, "child-heartbeat.txt");
     const child = join(root, "timeout-child.cjs");
     const parent = join(root, "timeout-parent.cjs");
-    writeFileSync(child, "setTimeout(() => require('node:fs').writeFileSync(process.argv[2], 'alive'), 1800);\nsetInterval(() => {}, 1000);\n");
+    writeFileSync(child, [
+      "const fs = require('node:fs');",
+      "setInterval(() => fs.appendFileSync(process.argv[2], `${Date.now()}\\n`), 100);",
+      "setInterval(() => {}, 1000);"
+    ].join("\n"));
     writeFileSync(parent, [
       "const { spawn } = require('node:child_process');",
       "spawn(process.execPath, [process.argv[3], process.argv[2]], { stdio: 'ignore' });",
@@ -556,7 +560,7 @@ describe("builtin tools", () => {
     ].join("\n"));
     const permissions = { ...defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], extraTools: ["shell"] }), sandboxMode: "danger-full-access" as const };
     const result = await mapTools().shell!.execute({
-      command: `node "${parent}" "${marker}" "${child}"`,
+      command: `node "${parent}" "${heartbeat}" "${child}"`,
       timeoutMs: 1_000
     }, {
       workspaceRoot: root,
@@ -567,9 +571,14 @@ describe("builtin tools", () => {
     expect(result.isError).toBe(false);
     expect(result.metadata?.background).toBe(true);
     expect(result.metadata?.sessionId).toBeTruthy();
+    for (let attempt = 0; attempt < 50 && !existsSync(heartbeat); attempt += 1) await delay(100);
+    expect(existsSync(heartbeat)).toBe(true);
     killShellSession(result.metadata!.sessionId!);
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_500));
-    expect(existsSync(marker)).toBe(false);
+    const killedAt = Date.now();
+    await delay(2_000);
+    const beats = readFileSync(heartbeat, "utf8").trim().split(/\s+/).map(Number);
+    expect(beats.length).toBeGreaterThan(0);
+    expect(beats.some((beat) => beat > killedAt + 500)).toBe(false);
   }, 60_000);
 
   it("runs a bounded read-only workflow and rejects write steps", async () => {
