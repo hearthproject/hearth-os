@@ -29,12 +29,15 @@ export type SandboxMode = (typeof SANDBOX_MODES)[number];
 
 export type CollaborationMode = "build" | "plan";
 
+export type AgentMode = "single" | "team";
+
 export interface ConversationSettings {
   executionMode?: ExecutionMode;
   executorEnabled: Record<ExecutorId, boolean>;
   approvalMode: ApprovalMode;
   preferredExecutorId: ExecutorId | null;
   collaborationMode?: CollaborationMode;
+  agentMode?: AgentMode;
 }
 
 export interface ConversationSettingsPatch {
@@ -43,6 +46,7 @@ export interface ConversationSettingsPatch {
   approvalMode?: ApprovalMode | undefined;
   preferredExecutorId?: ExecutorId | null | undefined;
   collaborationMode?: CollaborationMode | undefined;
+  agentMode?: AgentMode | undefined;
 }
 
 export function defaultConversationSettings(
@@ -51,7 +55,14 @@ export function defaultConversationSettings(
 ): ConversationSettings {
   const executorEnabled = {} as Record<ExecutorId, boolean>;
   for (const id of EXECUTOR_IDS) executorEnabled[id] = enabled[id] ?? false;
-  return { executorEnabled, approvalMode, preferredExecutorId: "native", executionMode: "standard", collaborationMode: "build" };
+  return {
+    executorEnabled,
+    approvalMode,
+    preferredExecutorId: "native",
+    executionMode: "standard",
+    collaborationMode: "build",
+    agentMode: "single"
+  };
 }
 
 export function mergeConversationSettings(
@@ -72,7 +83,8 @@ export function mergeConversationSettings(
     preferredExecutorId: patch?.preferredExecutorId !== undefined
       ? patch.preferredExecutorId
       : base.preferredExecutorId ?? "native",
-    collaborationMode: patch?.collaborationMode ?? base.collaborationMode ?? "build"
+    collaborationMode: patch?.collaborationMode ?? base.collaborationMode ?? "build",
+    agentMode: patch?.agentMode ?? base.agentMode ?? "single"
   };
 }
 

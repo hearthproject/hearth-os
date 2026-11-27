@@ -4506,6 +4506,10 @@ export class HearthStore {
       case "task.progress":
       case "task.budget.exhausted":
       case "task.budget.extended":
+      case "agent.mode":
+      case "subagent.delegated":
+      case "subagent.completed":
+      case "subagent.failed":
       case "approval.expired":
       case "approval.auto_approved":
       case "approval.grant.created":

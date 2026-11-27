@@ -51,6 +51,7 @@ const conversationSettingsSchema = z.object({
   approvalMode: z.enum(["necessary", "workspace", "full"]).optional(),
   executionMode: z.enum(["quick", "standard", "deep"]).optional(),
   collaborationMode: z.enum(["build", "plan"]).optional(),
+  agentMode: z.enum(["single", "team"]).optional(),
   preferredExecutorId: z.enum(EXECUTOR_IDS).nullable().optional()
 }).strict();
 
