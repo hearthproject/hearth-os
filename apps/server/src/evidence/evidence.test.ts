@@ -237,6 +237,7 @@ describe("policy engine", () => {
       defaults: { decision: "deny" },
       rules: [{
         id: "allow-example", priority: 80,
+        description: "允许示例域名的精确值与通配子域",
         match: { domains: ["api.example.com"], domainPatterns: ["*.example.com"] },
         decision: "allow", reason: "example_allowlist"
       }],
