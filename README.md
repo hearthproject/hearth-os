@@ -22,8 +22,8 @@
 </p>
 
 <p align="center">
-  <img alt="0.3.4 pre-release" src="https://img.shields.io/badge/0.3.4-pre--release-b8471d">
-  <img alt="931 tests passing on 2026-11-23" src="https://img.shields.io/badge/tests-931%20passing-2f7d4f">
+  <img alt="0.9.0 pre-release" src="https://img.shields.io/badge/0.9.0-pre--release-b8471d">
+  <img alt="1194 tests passing on 2026-11-27" src="https://img.shields.io/badge/tests-1194%20passing-2f7d4f">
   <img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-22.13%2B-3c8773">
   <img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-1b1815">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-yes-8d3412">
@@ -36,7 +36,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 模型可以更换，执行器可以替换，界面可以重写，但任务状态、授权范围、完成证据、产物摘要和外部回执必须留下来。Hearth 要回答的不是“模型能不能写出一段话”，而是“这件事有没有真正完成，失败后能不能接着做，外部动作能不能被核对”。
 
-> **当前状态（2026-11-23，v0.3.4）：** 本版是 0.3.x 的稳定性加固：工具副作用拆成业务结算与物理清理两条账，恢复闸门沿父 run 链拒绝重放未知副作用；服务端只写 SQLite 事件日志；`HostKernel` 管理宿主租约与阶段化恢复；Windows 改用 AppContainer 原生沙箱并支持 ConPTY 交互式 shell 与持久后台进程；新增 `run-evidence.json`、存储回收和 18 个崩溃点的长跑矩阵。验证：typecheck 0 错误、140 个测试文件 931 通过（946 总数，15 跳过）、长跑 18/18；0.3.4 NSIS 安装包（30.5 MiB）与便携 zip（47.2 MiB）已作为 [GitHub Pre-release](https://github.com/hearthproject/hearth-os/releases) 发布。自动更新签名、Authenticode、干净机卸载重装、真实账户与真实模型首跑仍未验收。逐项证据见[当前交付状态](https://hearthproject.github.io/hearth-os/delivery/status.html)。
+> **当前状态（2026-11-27，v0.9.0 开发线）：** 本版完成 Harness 六项能力：统一证据契约与产物 Provenance、Runtime Cassette Replay 与 Checkpoint Fork、生产/评测共用 Verifier、Policy as Code、真实 USD 成本与质量感知降级、Harness / Context Policy Lab。证据独立落 `<DATA_DIR>/evidence.sqlite` + 内容寻址 blob，Eval 只经版本化 HTTP 读取，不碰 OS SQLite。验证：typecheck 0 错误、159 个测试文件 1194 通过（1209 总数，15 跳过）、跨仓 evidence E2E 31/31；0.3.4 历史安装包仍在 Releases，0.9.0 发行物尚未做正式安装验收。自动更新签名、Authenticode、干净机卸载重装、真实账户与真实模型首跑仍未验收。逐项证据见[当前交付状态](https://hearthproject.github.io/hearth-os/delivery/status.html)。
 
 ## 界面一览
 
@@ -98,11 +98,11 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 | 领域 | 状态 | 证据 | 留空 |
 |---|---|---|---|
-| 运行时稳定 | 完成 | 140 个测试文件、931 个用例通过；长跑矩阵 18/18；每个终态 run 输出 `run-evidence.json` | 真实用户长期崩溃恢复演练 |
+| 运行时稳定 | 完成 | 159 个测试文件、1194 个用例通过；长跑矩阵 18/18；每个终态 run 输出 `run-evidence.json` | 真实用户长期崩溃恢复演练 |
 | Windows 沙箱 | 代码闭环 | 12 项真实测试：越界写、只读、junction 逃逸、密钥过滤、网络拒绝、PTY 与 Job 关闭 | 非管理员环境之外的发行版验证、企业策略兼容 |
 | 持久后台任务 | 完成 | SQLite `background_processes`、PID + 创建时间恢复、`lost` 标记与进程树清理 | 跨宿主重启的终端状态恢复（明确不做） |
 | 浏览器 | 代码闭环 | 13 个工具、独立 profile、证据目录与页面断言 | 日常 Chrome 扩展桥、验证码/风控站点 |
-| 首跑与更新 | 代码闭环 | `npm run first:run`、0.3.4 安装包与便携 zip、SHA256 校验 | 自动更新签名、Authenticode、干净机卸载重装 |
+| 首跑与更新 | 代码闭环 | `npm run first:run`、0.9.0 安装包与便携 zip、SHA256 校验 | 自动更新签名、Authenticode、干净机卸载重装 |
 | 资料库与交接 | 完成 | 树、检索、预览、回收站；接手摘要、交接包入库与导出 | 真实长期写作/编码使用 |
 | 工程门禁 | 完成 | typecheck、CI 分层、commitlint、husky、PR 模板、文档构建 | 分支保护与远端 CI 实际运行记录 |
 
@@ -213,9 +213,9 @@ npm ci
 npm run tauri:build
 ```
 
-生成 `release\Hearth_0.3.4_x64-setup.exe`（NSIS 按用户安装，免 UAC，安装到 `%LOCALAPPDATA%\Programs\Hearth`）。安装后双击开始菜单的 Hearth 即可；关窗会隐藏到托盘，托盘菜单负责退出、环境体检、桌面助手、数据目录和日志目录。首次启动会让你选择现有 `.hearth` 或新建数据目录。也可以直接从 [GitHub Releases](https://github.com/hearthproject/hearth-os/releases) 下载同一个安装包或便携 zip，下载后用 `SHA256SUMS.txt` 核对。
+生成 `release\Hearth_0.9.0_x64-setup.exe`（NSIS 按用户安装，免 UAC，安装到 `%LOCALAPPDATA%\Programs\Hearth`）。安装后双击开始菜单的 Hearth 即可；关窗会隐藏到托盘，托盘菜单负责退出、环境体检、桌面助手、数据目录和日志目录。首次启动会让你选择现有 `.hearth` 或新建数据目录。也可以直接从 [GitHub Releases](https://github.com/hearthproject/hearth-os/releases) 下载同一个安装包或便携 zip，下载后用 `SHA256SUMS.txt` 核对。
 
-桌面版只保留 Tauri 实现：内置官方 Node 22.23.2、npm 10.9.8 和全部服务端功能，0.3.4 安装包 30.5 MiB、便携包 47.2 MiB。Codex 使用系统中的 `codex.exe`，不内置 479 MiB 平台二进制。
+桌面版只保留 Tauri 实现：内置官方 Node 22.23.2、npm 10.9.8 和全部服务端功能，0.9.0 安装包 30.5 MiB、便携包 47.2 MiB。Codex 使用系统中的 `codex.exe`，不内置 479 MiB 平台二进制。
 
 构建、体积、数据目录、日志、托盘、环境体检和已知限制见 [docs/design/desktop.md](docs/design/desktop.md)；从 Electron 到约 131 MiB 的完整压缩过程、体积去向和使用前提见 [docs/design/desktop-compression.md](docs/design/desktop-compression.md)。
 
@@ -370,7 +370,7 @@ hearth-os/
 - MCP 已支持 Registry 安装、stdio 与 Streamable HTTP，但尚不自动完成供应商专属 OAuth、交互式登录、验证码或 Registry 未声明的配置。
 - 原生运行时仍不支持图片/扫描件视觉理解、PPTX、LSP、格式化器或自动 cherry-pick。
 - cleanup 目前对已登记 shell 进程执行真实终止；subagent/worktree/browser 等资源暂无清理 handler 时会明确记 `failed` 并留下原因。
-- 这是 `0.3.4` 预发布版本，以 [GitHub Pre-release](https://github.com/hearthproject/hearth-os/releases) 形式发布，不是 v1.0 正式发布。
+- 这是 `0.9.0` 预发布版本，以 [GitHub Pre-release](https://github.com/hearthproject/hearth-os/releases) 形式发布，不是 v1.0 正式发布。
 
 ## 验证
 
