@@ -349,7 +349,7 @@ internal static class HearthNative
         IntPtr ptyInput = IntPtr.Zero;
         IntPtr ptyOutput = IntPtr.Zero;
         IntPtr ptyInputRead = IntPtr.Zero;
-        int attributeCount = usePty ? 2 : 1;
+        int attributeCount = 1;
         var startup = new STARTUPINFOEX();
         startup.StartupInfo.cb = Marshal.SizeOf(typeof(STARTUPINFOEX));
         if (usePty)
@@ -374,27 +374,34 @@ internal static class HearthNative
             CloseHandle(outputWrite);
             if (hr < 0)
             {
-                Console.Error.WriteLine("sandbox-error: CreatePseudoConsole failed 0x" + hr.ToString("X8"));
+                // ConPTY is unavailable (for example when the helper is launched
+                // without a console). Degrade to plain pipe I/O instead of failing
+                // the whole run: callers still get a working interactive process.
+                Console.Error.WriteLine("sandbox-warning: CreatePseudoConsole failed 0x" + hr.ToString("X8") + "; falling back to pipe I/O");
+                CloseHandle(inputRead);
                 CloseHandle(inputWrite);
                 CloseHandle(outputRead);
-                CloseHandle(job);
-                return 127;
+                usePty = false;
             }
-            ptyInputRead = inputRead;
-            ptyInput = inputWrite;
-            ptyOutput = outputRead;
-            startup.StartupInfo.dwFlags = (int)STARTF_USESTDHANDLES;
-            startup.StartupInfo.hStdInput = new IntPtr(-1);
-            startup.StartupInfo.hStdOutput = new IntPtr(-1);
-            startup.StartupInfo.hStdError = new IntPtr(-1);
+            else
+            {
+                ptyInputRead = inputRead;
+                ptyInput = inputWrite;
+                ptyOutput = outputRead;
+                startup.StartupInfo.dwFlags = (int)STARTF_USESTDHANDLES;
+                startup.StartupInfo.hStdInput = new IntPtr(-1);
+                startup.StartupInfo.hStdOutput = new IntPtr(-1);
+                startup.StartupInfo.hStdError = new IntPtr(-1);
+            }
         }
-        else
+        if (!usePty)
         {
             startup.StartupInfo.dwFlags = (int)STARTF_USESTDHANDLES;
             startup.StartupInfo.hStdInput = GetStdHandle(-10);
             startup.StartupInfo.hStdOutput = GetStdHandle(-11);
             startup.StartupInfo.hStdError = GetStdHandle(-12);
         }
+        attributeCount = usePty ? 2 : 1;
 
         var capabilities = new SECURITY_CAPABILITIES();
         capabilities.AppContainerSid = packageSid;

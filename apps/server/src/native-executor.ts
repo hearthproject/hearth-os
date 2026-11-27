@@ -36,6 +36,14 @@ import {
   runAgent,
   zeroUsage,
   SandboxUnavailableError,
+  cassetteModel,
+  cassetteTools,
+  describeModelRequest,
+  modelRequestFingerprint,
+  toolCatalogDigest,
+  type CassetteMode,
+  type CassetteSource,
+  type ExchangeRecorder,
   type AgentCheckpoint,
   type AgentFailure,
   type ContextSummary,
@@ -149,6 +157,27 @@ export interface NativeRunOptions {
   toolCircuitBreaker?: {
     maxConsecutiveFailures?: number;
   };
+  /**
+   * Runtime cassette plane. `record` wraps the real model/tools and captures
+   * every exchange; `strict_replay` accepts only recorded exchanges; and
+   * `live_on_divergence` replays when possible and reports the first leave.
+   */
+  cassette?: {
+    mode: CassetteMode;
+    recorder?: ExchangeRecorder;
+    source?: CassetteSource;
+    onDivergence?: (info: { category: string; fingerprint: string; detail: Record<string, unknown> }) => void;
+    /** Persists the exact live tool-catalog digest so strict replay can match tool calls. */
+    onToolCatalogDigest?: (digest: string) => void;
+  };
+  /** Called for every model request with its canonical fingerprint. */
+  onModelRequest?: (info: {
+    requestFingerprint: string;
+    messageCount: number;
+    toolCount: number;
+    turn: number;
+    request: unknown;
+  }) => void;
 }
 
 export interface NativeRunResult {
@@ -318,9 +347,41 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   const workspaceHooks = loadWorkspaceHooks(options.prepared.root, process.env.HEARTH_TRUST_WORKSPACE_HOOKS === "1");
   //具体实现
   const backgroundTasks = getBackgroundTaskRegistry();
+  const baseModel: AgentModel = drafting
+    ? draftModelAdapter(options.settings, resolve(options.prepared.outDir, options.expectedOutputs[0] ?? "result.md"))
+    : modelAdapter(options.settings, options.onModelRequest);
+  const model: AgentModel = options.cassette
+    ? cassetteModel(baseModel, {
+        mode: options.cassette.mode,
+        runId: options.runId ?? options.taskId ?? options.task.id,
+        modelId: options.settings.model,
+        protocol: options.settings.protocol,
+        sampling: {
+          temperature: 0.2,
+          maxTokens: options.settings.maxOutputTokens,
+          reasoningEffort: options.settings.reasoningEffort ?? "max"
+        },
+        ...(options.cassette.recorder ? { recorder: options.cassette.recorder } : {}),
+        ...(options.cassette.source ? { source: options.cassette.source } : {}),
+        ...(options.cassette.onDivergence ? { onDivergence: options.cassette.onDivergence } : {})
+      })
+    : baseModel;
+  if (options.cassette?.onToolCatalogDigest) {
+    options.cassette.onToolCatalogDigest(toolCatalogDigest(toolsForRun));
+  }
+  const runtimeTools = options.cassette
+    ? cassetteTools(toolsForRun, {
+        mode: options.cassette.mode,
+        runId: options.runId ?? options.taskId ?? options.task.id,
+        catalogDigest: toolCatalogDigest(toolsForRun),
+        ...(options.cassette.recorder ? { recorder: options.cassette.recorder } : {}),
+        ...(options.cassette.source ? { source: options.cassette.source } : {}),
+        ...(options.cassette.onDivergence ? { onDivergence: options.cassette.onDivergence } : {})
+      })
+    : toolsForRun;
   const result = await runAgent({
-    model: drafting ? draftModelAdapter(options.settings, resolve(options.prepared.outDir, options.expectedOutputs[0] ?? "result.md")) : modelAdapter(options.settings),
-    tools: toolsForRun,
+    model,
+    tools: runtimeTools,
     goal: options.prompt,
     systemPrompt,
     budget: withBudgetDefaults(options.budget, coding ? CODING_RUN_BUDGET : DEFAULT_RUN_BUDGET),
@@ -1637,8 +1698,56 @@ function nativeRetryPolicy(settings: ModelSettings): RetryPolicy {
   });
 }
 
-function modelAdapter(settings: ModelSettings): AgentModel {
+function modelAdapter(
+  settings: ModelSettings,
+  onRequest?: NativeRunOptions["onModelRequest"]
+): AgentModel {
+  let turn = 0;
   return async (messages: AgentMessage[], tools, onDelta, signal) => {
+    const turnIndex = turn;
+    turn += 1;
+    if (onRequest) {
+      try {
+        const fingerprint = modelRequestFingerprint(describeModelRequest({
+          modelId: settings.model,
+          protocol: settings.protocol,
+          messages: messages.map((message) => {
+            if (message.role === "tool") {
+              return { role: "tool", content: message.content, name: message.name };
+            }
+            if (message.role === "assistant") {
+              return {
+                role: "assistant",
+                content: message.content,
+                ...(message.toolCalls.length > 0
+                  ? { toolCalls: message.toolCalls.map((call) => ({ name: call.name, arguments: call.arguments })) }
+                  : {})
+              };
+            }
+            return { role: message.role, content: message.content };
+          }),
+          tools,
+          sampling: {
+            temperature: 0.2,
+            maxTokens: settings.maxOutputTokens,
+            reasoningEffort: settings.reasoningEffort ?? "max"
+          }
+        }));
+        onRequest({
+          requestFingerprint: fingerprint,
+          messageCount: messages.length,
+          toolCount: tools.length,
+          turn: turnIndex,
+          request: {
+            modelId: settings.model,
+            systemMessage: messages.find((message) => message.role === "system")?.content ?? null,
+            tools: tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }))
+          }
+        });
+      } catch {
+        // Fingerprints are evidence, never a reason to fail a live run.
+      }
+    }
     const result = await streamAgentTurn(settings, messages, tools, onDelta, {
       signal,
       temperature: 0.2,

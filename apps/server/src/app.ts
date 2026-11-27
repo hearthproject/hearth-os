@@ -14,6 +14,12 @@ import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
 import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DOSSIER_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, HANDOFF_DIR, LIBRARY_MODEL_DIR, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, REPO_ROOT, SKILL_DIR, SOURCE_CONTENT_DIR, SUPERVISION_PATH, WEB_DIST, WORKSPACE_DIR, WORKSTYLE_PATH } from "./config.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
+import { EvidenceStore } from "./evidence/store.ts";
+import { PricingRegistry } from "./evidence/pricing.ts";
+import { EvidenceService } from "./evidence/service.ts";
+import { ReplayService } from "./evidence/replay.ts";
+import { registerEvidenceRoutes } from "./evidence/routes.ts";
+import { BASELINE_VARIANT, variantById } from "./evidence/variant.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
 import { clearExecutorHealthCache, executorHealth as readExecutorHealth, executorRuntimeSettings, probeExecutor } from "./executor-runtime.ts";
@@ -914,6 +920,29 @@ export async function buildServer(options: BuildServerOptions = {}) {
     service,
     planRoot: join(options.dataDir ?? DATA_DIR, "plans")
   });
+  const evidenceDataDir = options.dataDir ?? DATA_DIR;
+  const evidenceStore = new EvidenceStore(join(evidenceDataDir, "evidence.sqlite"));
+  const pricing = new PricingRegistry({
+    dataDir: evidenceDataDir,
+    envPath: process.env.HEARTH_PRICING_FILE ?? null
+  });
+  const evalRepoPath = process.env.HEARTH_EVAL_REPO
+    ?? (existsSync(join(REPO_ROOT, "..", "hearth-eval")) ? join(REPO_ROOT, "..", "hearth-eval") : null);
+  const evidence = new EvidenceService({
+    store: evidenceStore,
+    service,
+    pricing,
+    dataDir: evidenceDataDir,
+    repoPaths: [REPO_ROOT],
+    evalRepoPath,
+    variant: variantById(process.env.HEARTH_HARNESS_VARIANT ?? BASELINE_VARIANT.id),
+    modelForExecutor: (executorId) => modelSettingsForExecutor((executorId ?? "native") as "native" | "codex" | "deepseek-harness")
+  });
+  const replayService = new ReplayService(service, evidenceStore, {
+    dataDir: evidenceDataDir,
+    workspaceRoot: WORKSPACE_DIR,
+    settingsForNative: () => modelSettingsForExecutor("native")
+  });
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,
@@ -934,6 +963,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         libraryMcp,
         skills,
         attachmentRoot,
+        evidence,
         executorSettingsPath,
         executorSettingsProvider: () => executorSettingsStore.load(),
         executorHealth,
@@ -1076,6 +1106,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
   registerGoalRoutes(app, { service, goals });
   registerPlanRoutes(app, { plans });
   registerApprovalGrantRoutes(app, approvals.grants);
+  registerEvidenceRoutes(app, {
+    service,
+    evidence,
+    store: evidenceStore,
+    replay: replayService,
+    dataDir: evidenceDataDir
+  });
+  app.addHook("onClose", async () => {
+    evidence.dispose();
+    evidenceStore.close();
+  });
   library.start();
   app.addHook("onClose", async () => {
     library.stop();

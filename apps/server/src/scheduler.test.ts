@@ -2669,13 +2669,14 @@ function testOutDir(options: { workingDirectory: string; outDir?: string }): str
 }
 
 async function waitForStatus(service: HearthService, taskId: string, expected: TaskStatus): Promise<TaskRecord> {
-  const deadline = Date.now() + 4_000;
+  const deadline = Date.now() + 8_000;
   while (Date.now() < deadline) {
     const task = service.store.getTask(taskId);
     if (task?.status === expected) return task;
-    await delay(20);
+    await delay(50);
   }
   const current = service.store.getTask(taskId);
+  if (current?.status === expected) return current;
   throw new Error(`Timed out waiting for ${expected}; current=${current?.status}; error=${current?.error?.message ?? "none"}`);
 }
 

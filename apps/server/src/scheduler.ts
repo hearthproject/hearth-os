@@ -56,6 +56,7 @@ import { classifyTool } from "./action-policy.ts";
 import { createMcpTools, parseMcpToolName } from "./mcp-tools.ts";
 import type { McpServerService } from "./mcp-servers.ts";
 import { DEFAULT_RUN_BUDGET, nativePermissionsFor, runNativeTask } from "./native-executor.ts";
+import type { EvidenceService } from "./evidence/service.ts";
 import { ContextBroker } from "./context-broker.ts";
 import type { LibraryService } from "./library/service.ts";
 import { createLibraryTools } from "./library/tools.ts";
@@ -169,6 +170,8 @@ export interface SchedulerOptions {
   ontologyWriter?: OntologyWriter | undefined;
   goals?: GoalService | undefined;
   plans?: PlanService | undefined;
+  /** Evidence plane; absent disables cassette recording and manifests. */
+  evidence?: EvidenceService | undefined;
   deferStartup?: boolean | undefined;
 }
 
@@ -229,6 +232,7 @@ export class HearthScheduler {
   private readonly contextBroker: ContextBroker | undefined;
   private readonly library: LibraryService | undefined;
   private readonly libraryMcp: LibraryMcpLaunch | undefined;
+  private readonly evidence: EvidenceService | undefined;
   private readonly skills: SkillService | undefined;
   private readonly ontology: OntologyService;
   private readonly ontologyWriter: OntologyWriter;
@@ -306,6 +310,7 @@ export class HearthScheduler {
     this.contextBroker = options.contextBroker;
     this.library = options.library;
     this.libraryMcp = options.libraryMcp;
+    this.evidence = options.evidence;
     this.skills = options.skills;
     this.ontology = new OntologyService(this.service);
     this.ontologyWriter = options.ontologyWriter ?? new OntologyWriter(this.service, this.ontology);
@@ -968,7 +973,8 @@ export class HearthScheduler {
 
   private requeueLegacyGates(): void {
     const gated = this.service.store.listTasks().filter((task) =>
-      task.status === "waiting_budget" || task.status === "waiting_approval"
+      task.status === "waiting_approval" ||
+      (task.status === "waiting_budget" && task.error?.kind !== "budget_exceeded")
     );
     for (const task of gated) {
       this.service.updateTask(task.id, {
@@ -1708,7 +1714,7 @@ export class HearthScheduler {
     expectedOutputs: string[]
   ): Promise<string[]> {
     const issues = missingExpectedOutputs(prepared.outDir, expectedOutputs)
-      .map((missing) => `缺少期望产物：${missing}`);
+      .map((missing) => missing.startsWith("缺少期望产物：") ? missing : `缺少期望产物：${missing}`);
     if (approvalKindForTask(task) === "github.publish-pr" && prepared.repository) {
       const inspection = await inspectRepository(prepared.repository, this.githubRun);
       if (!inspection.clean) issues.push(`仓库仍有未提交改动：\n${inspection.status}`);
@@ -2089,6 +2095,23 @@ export class HearthScheduler {
             return;
           }
         }
+        const usdBudget = this.evidence?.budgetDecision(task);
+        if (usdBudget && !usdBudget.allowed) {
+          const blocking = usdBudget.statuses.find((status) => status.decision === "block");
+          this.service.updateTask(taskId, {
+            status: "waiting_budget",
+            nextAction: "USD 预算已用尽，等待追加预算",
+            error: {
+              kind: "budget_exceeded",
+              message: blocking?.reason ?? usdBudget.reason,
+              recoverable: true,
+              guidance: "追加任务预算或调整 budgets.json 后点击“继续执行”"
+            }
+          }, previousRun?.id);
+          this.refreshTaskSummary(taskId);
+          return;
+        }
+        const degradeStatus = usdBudget?.statuses.find((status) => status.decision === "degrade" || status.decision === "soft");
         const attempt = this.service.store.listRuns(taskId).length + 1;
         const runId = randomUUID();
         const taskRoot = this.taskRoot(taskId);
@@ -2110,6 +2133,43 @@ export class HearthScheduler {
           parentRunId: previousRun?.id ?? null, handoffId: handoff?.id ?? null
         };
         this.service.createRun(run);
+        let attemptBudget = remainingBudget;
+        if (degradeStatus && this.evidence) {
+          const directive = this.evidence.escalateBudget(runId, degradeStatus.reason, { status: degradeStatus });
+          const event = this.service.store.appendEvent({
+            type: "budget.degraded",
+            taskId,
+            runId,
+            payload: { ...directive, trigger: degradeStatus.reason, status: degradeStatus, at: new Date().toISOString() }
+          });
+          this.service.bus.publish(event);
+          if (directive.stop) {
+            this.service.updateRun(runId, taskId, {
+              status: "failed", endedAt: new Date().toISOString(),
+              failure: {
+                kind: "budget_exceeded", message: directive.reason, recoverable: true,
+                guidance: "追加预算或降低任务范围后重试"
+              }
+            });
+            this.service.updateTask(taskId, {
+              status: "waiting_budget", currentRunId: runId,
+              nextAction: "预算降级已到最低档，等待追加预算",
+              error: {
+                kind: "budget_exceeded", message: directive.reason, recoverable: true,
+                guidance: "追加任务预算或调整 budgets.json 后点击“继续执行”"
+              }
+            }, runId);
+            this.refreshTaskSummary(taskId);
+            return;
+          }
+          attemptBudget = {
+            ...remainingBudget,
+            ...(remainingBudget.maxToolCalls !== undefined
+              ? { maxToolCalls: Math.max(1, Math.floor(remainingBudget.maxToolCalls * directive.contextScale)) }
+              : {})
+          };
+          run.budget = attemptBudget;
+        }
         if (appliedFollowUp) {
           this.service.updateTaskFollowUp(appliedFollowUp.id, {
             status: "applied", appliedRunId: runId, error: null
@@ -2122,7 +2182,7 @@ export class HearthScheduler {
         }, runId);
         const manifestRoot = this.inPlaceWorkspace(task);
         const manifestBefore = manifestRoot ? snapshotWorkspace(manifestRoot) : null;
-        const result = await this.runAttempt({ task, run, executorId, taskRoot, outDir, handoff, pendingInput, resumePrompt, previousRun, controller, budget: remainingBudget, goalPrompt });
+        const result = await this.runAttempt({ task, run, executorId, taskRoot, outDir, handoff, pendingInput, resumePrompt, previousRun, controller, budget: attemptBudget, goalPrompt });
         this.reconcileTaskCleanup(taskId);
         if (manifestRoot && manifestBefore) this.recordInPlaceChanges(task, manifestRoot, manifestBefore);
         if (result.status === "paused") {
@@ -2924,18 +2984,47 @@ export class HearthScheduler {
         }
       };
       const execute = async (executionPrompt: string, resume?: AgentResumeState, resumePrompt?: string): Promise<ExecutionOutcome> => {
+        const cassette = executorId === "native" && this.evidence
+          ? this.evidence.beginCassette(run, task, executionPrompt)
+          : null;
         const invocation = {
           ...attemptContext,
           prompt: executionPrompt,
-          ...(resumePrompt ? { resumePrompt } : {})
+          ...(resumePrompt ? { resumePrompt } : {}),
+          ...(cassette ? {
+            cassette: {
+              mode: "record" as const,
+              recorder: cassette.recorder,
+              onToolCatalogDigest: (digest: string) => cassette.session.setToolCatalogDigest(digest)
+            },
+            onModelRequest: (info: {
+              requestFingerprint: string;
+              messageCount: number;
+              toolCount: number;
+              turn: number;
+              request: unknown;
+            }) => this.evidence?.recordModelRequest(runId, info)
+          } : {})
         };
         try {
           const outcome = resume && adapter.resume
             ? await adapter.resume({ ...invocation, resume })
             : await adapter.execute(invocation);
+          cassette?.session.finish({
+            status: outcome.status,
+            turns: outcome.turns ?? null,
+            toolCalls: outcome.toolCalls ?? null,
+            usage: outcome.usage ?? null,
+            question: outcome.question ?? null,
+            failure: outcome.failure ?? null
+          });
           this.appendTeamOutcome(taskId, runId, resolvedAgentMode, outcome.team);
           return outcome;
         } catch (error) {
+          cassette?.session.finish({
+            status: "failed",
+            error: error instanceof Error ? error.message : String(error)
+          });
           this.appendTeamOutcome(taskId, runId, resolvedAgentMode);
           throw error;
         }
@@ -3711,6 +3800,36 @@ export class HearthScheduler {
 
   private captureNativeEvent(task: TaskRecord, run: RunRecord, event: RuntimeEvent): void {
     const base = { taskId: task.id, conversationId: task.conversationId ?? null, runId: run.id, executorId: "native" as const, role: "system" as const };
+    if (event.type === "prompt.snapshot") {
+      // Prompt/tool hashes must reach the evidence plane, not just the UI.
+      try {
+        const envelope = this.service.store.appendEvent({
+          type: "runtime.prompt.snapshot",
+          taskId: task.id,
+          runId: run.id,
+          payload: {
+            ...event,
+            registryVersion: "native-v1",
+            finalPromptHash: event.systemPromptHash,
+            toolCount: null,
+            toolPolicy: "full",
+            contextPolicyVersion: `context-${this.context.settings().mode}`,
+            compactionThreshold: this.context.settings().conversationCompactRatio ?? null
+          }
+        });
+        this.service.bus.publish(envelope);
+      } catch {
+        // Evidence capture never fails a run.
+      }
+      this.capture({
+        ...base,
+        kind: "notice",
+        content: `Prompt 快照：system=${event.systemPromptHash.slice(0, 12)} tools=${event.toolSchemaHash.slice(0, 12)}`,
+        provenance: { source: "native", turn: event.turn, systemPromptHash: event.systemPromptHash, toolSchemaHash: event.toolSchemaHash },
+        executorEventId: `native:prompt:${event.turn}`
+      });
+      return;
+    }
     if (event.type === "context.usage") {
       if (event.systemPrompt) {
         rememberSystemContext({

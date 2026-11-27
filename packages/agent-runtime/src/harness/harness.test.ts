@@ -22,7 +22,13 @@ import type { AgentMessage, AgentToolContext } from "../types.ts";
 const roots: string[] = [];
 
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  for (const root of roots.splice(0)) {
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch {
+      // Windows may still hold a shell-session handle briefly; cleanup is best effort.
+    }
+  }
 });
 
 function workspace(): string {

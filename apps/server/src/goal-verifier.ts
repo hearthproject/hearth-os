@@ -13,6 +13,7 @@ import type {
 } from "@hearth/core";
 import { goalEvidenceKey } from "@hearth/core";
 import { parseCommandCheck, type GoalCommandResult } from "./goal-command.ts";
+import { checkArtifactOnDisk, runVerificationUnit } from "./evidence/verification.ts";
 
 export interface GoalObservedAction {
   kind: string;
@@ -147,19 +148,17 @@ function verifyFile(criterion: GoalCriterion, input: CriterionContext): GoalCrit
   const path = typeof parsed?.path === "string" ? parsed.path : criterion.check.trim();
   const expectExists = parsed?.exists !== false;
   const expectedSha = typeof parsed?.sha256 === "string" ? parsed.sha256.toLowerCase() : null;
-  const absolute = safeResolve(input.workspaceRoot, path);
-  if (!absolute.ok) {
-    return failedCriterion(criterion, absolute.error);
-  }
-  if (!existsSync(absolute.path)) {
-    return expectExists
-      ? failedCriterion(criterion, `文件不存在：${path}`)
+  if (!expectExists) {
+    const check = checkArtifactOnDisk(input.workspaceRoot, path);
+    return check.ok
+      ? failedCriterion(criterion, `文件仍然存在：${path}`)
       : { criterionId: criterion.id, status: "passed", evidenceRefs: [path], detail: `文件确已不存在：${path}` };
   }
-  if (!expectExists) {
-    return failedCriterion(criterion, `文件仍然存在：${path}`);
-  }
+  const check = checkArtifactOnDisk(input.workspaceRoot, path);
+  if (!check.ok) return failedCriterion(criterion, check.message.replace(/^缺少产物：/, `文件不存在：`));
   if (expectedSha) {
+    const absolute = safeResolve(input.workspaceRoot, path);
+    if (!absolute.ok) return failedCriterion(criterion, absolute.error);
     const actual = createHash("sha256").update(readFileSync(absolute.path)).digest("hex");
     if (actual !== expectedSha) {
       return failedCriterion(criterion, `文件哈希不匹配：${actual}`);
@@ -201,26 +200,20 @@ async function verifyGit(criterion: GoalCriterion, input: CriterionContext): Pro
   return { criterionId: criterion.id, status: "passed", evidenceRefs: evidence, detail: "git 校验通过" };
 }
 
-function verifySchema(criterion: GoalCriterion, input: CriterionContext): GoalCriterionResult {
+async function verifySchema(criterion: GoalCriterion, input: CriterionContext): Promise<GoalCriterionResult> {
   const parsed = parseJsonCheck(criterion.check);
   if (!parsed || typeof parsed.file !== "string" || !parsed.schema || typeof parsed.schema !== "object") {
     return notRunCriterion(criterion, "schema 校验需要 JSON：{ file, schema }");
   }
-  const absolute = safeResolve(input.workspaceRoot, parsed.file);
-  if (!absolute.ok) return failedCriterion(criterion, absolute.error);
-  if (!existsSync(absolute.path)) return failedCriterion(criterion, `文件不存在：${parsed.file}`);
-  try {
-    const data = JSON.parse(readFileSync(absolute.path, "utf8")) as unknown;
-    const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: false });
-    const validate = ajv.compile(parsed.schema as object);
-    if (validate(data)) {
-      return { criterionId: criterion.id, status: "passed", evidenceRefs: [parsed.file], detail: "JSON schema 校验通过" };
-    }
-    const errors = (validate.errors ?? []).map((error) => `${error.instancePath || "/"} ${error.message ?? ""}`).join("; ");
-    return failedCriterion(criterion, `JSON schema 不匹配：${errors}`);
-  } catch (error) {
-    return failedCriterion(criterion, `schema 校验失败：${error instanceof Error ? error.message : String(error)}`);
+  const unit = await runVerificationUnit(
+    { type: "schema", path: parsed.file as string, jsonSchema: parsed.schema as Record<string, unknown>, id: criterion.id },
+    { workspaceRoot: input.workspaceRoot }
+  );
+  if (unit.status === "pass") {
+    return { criterionId: criterion.id, status: "passed", evidenceRefs: [parsed.file as string], detail: "JSON schema 校验通过" };
   }
+  if (unit.status === "inconclusive") return notRunCriterion(criterion, unit.reason);
+  return failedCriterion(criterion, `JSON schema 不匹配：${unit.reason}`);
 }
 
 async function verifyCommand(criterion: GoalCriterion, input: CriterionContext): Promise<GoalCriterionResult> {

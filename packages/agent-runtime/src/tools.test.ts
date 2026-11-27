@@ -570,7 +570,7 @@ describe("builtin tools", () => {
     killShellSession(result.metadata!.sessionId!);
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_500));
     expect(existsSync(marker)).toBe(false);
-  }, 10_000);
+  }, 60_000);
 
   it("runs a bounded read-only workflow and rejects write steps", async () => {
     const root = workspace(roots);

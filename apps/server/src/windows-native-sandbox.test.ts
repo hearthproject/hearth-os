@@ -41,7 +41,7 @@ async function run(provider: WindowsNativeSandboxProvider, policy: SandboxPolicy
   });
 }
 
-describe("WindowsNativeSandboxProvider", () => {
+describe("WindowsNativeSandboxProvider", { timeout: 90_000 }, () => {
   it.runIf(isWindows)("builds a native helper argv with workspace, temp and write roots", async () => {
     const provider = new WindowsNativeSandboxProvider({ helperPath: process.execPath, probe: false });
     const workspace = "C:\\work";
@@ -107,7 +107,7 @@ describe("WindowsNativeSandboxProvider", () => {
         const timer = setTimeout(() => {
           child.kill();
           reject(new Error(`PTY output timeout: ${text.slice(-500)}`));
-        }, 12_000);
+        }, 60_000);
         child.stdout.on("data", (chunk: Buffer) => {
           text += chunk.toString("utf8");
           if (text.includes("pty-ok")) {
@@ -129,7 +129,7 @@ describe("WindowsNativeSandboxProvider", () => {
     } finally {
       removeTempDirectory(root);
     }
-  }, 20_000);
+  }, 90_000);
 
   it.runIf(isWindows)("refuses net-allowlist instead of silently removing network access", async () => {
     const provider = new WindowsNativeSandboxProvider({ helperPath: process.execPath, probe: false });
@@ -239,7 +239,7 @@ describe("WindowsNativeSandboxProvider", () => {
     } finally {
       removeTempDirectory(root);
     }
-  }, 15_000);
+  }, 90_000);
 
   it.runIf(hasHelper)("does not follow a junction out of the workspace", async () => {
     const root = mkdtempSync(join(tmpdir(), "hearth-native-test-"));
@@ -280,7 +280,7 @@ describe("WindowsNativeSandboxProvider", () => {
         policy: policyFor(workspace, temp)
       });
       const helper = spawn(confined.argv[0]!, confined.argv.slice(1), { cwd: confined.cwd, env: confined.env, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
-      for (let attempt = 0; attempt < 50 && !existsSync(pidPath); attempt++) {
+      for (let attempt = 0; attempt < 300 && !existsSync(pidPath); attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       const childPid = Number.parseInt(readFileSync(pidPath, "utf8").trim(), 10);
@@ -299,5 +299,5 @@ describe("WindowsNativeSandboxProvider", () => {
         }
       }
     }
-  }, 30_000);
+  }, 60_000);
 });

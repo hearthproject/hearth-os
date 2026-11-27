@@ -90,6 +90,20 @@ export interface ExecutorAttemptContext {
   onDshContextItem: (event: DshContextEvent) => void;
   onCodexContextItem: (item: CodexContextItem) => void;
   onCodexThreadStarted: (threadId: string) => void;
+  /** Runtime cassette plane (record/replay) for the native executor. */
+  cassette?: {
+    mode: "record" | "strict_replay" | "live_on_divergence";
+    recorder?: import("@hearth/agent-runtime").ExchangeRecorder;
+    source?: import("@hearth/agent-runtime").CassetteSource;
+    onDivergence?: (info: { category: string; fingerprint: string; detail: Record<string, unknown> }) => void;
+  };
+  onModelRequest?: (info: {
+    requestFingerprint: string;
+    messageCount: number;
+    toolCount: number;
+    turn: number;
+    request: unknown;
+  }) => void;
 }
 
 export interface ExecutorInvocation extends ExecutorAttemptContext {
@@ -200,7 +214,9 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       onContextEvent: input.onNativeContextEvent,
       onCheckpoint: input.onNativeCheckpoint,
       ...(input.onAuthorizeTool ? { onAuthorizeTool: input.onAuthorizeTool } : {}),
-      ...(input.isFullPermission ? { isFullPermission: input.isFullPermission } : {})
+      ...(input.isFullPermission ? { isFullPermission: input.isFullPermission } : {}),
+      ...(input.cassette ? { cassette: input.cassette } : {}),
+      ...(input.onModelRequest ? { onModelRequest: input.onModelRequest } : {})
     });
     const team = teamOutcome(input, { configApplied: true, usage: "full" });
     return {

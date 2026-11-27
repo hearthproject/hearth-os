@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import type { ArtifactRecord, ExecutorId, RunRecord, RunUsage, TaskRecord } from "@hearth/core";
 import { sha256File, type PreparedInput, resolveInside } from "./workspace.ts";
+import { checkArtifactOnDisk } from "./evidence/verification.ts";
 
 const MAX_FILES = 1_000;
 const MAX_TOTAL_BYTES = 100 * 1024 * 1024;
@@ -127,15 +128,9 @@ export function validateExpectedOutputs(outDir: string, expectedOutputs: string[
   for (const expected of expectedOutputs) {
     const relativePath = expected.replace(/[\\/]+$/, "");
     if (!relativePath) throw new Error(`无效的期望产物路径：${expected}`);
-    const target = resolveInside(outDir, relativePath);
-    if (!existsSync(target)) throw new Error(`缺少期望产物：${expected}`);
-    const stat = lstatSync(target);
-    if (stat.isSymbolicLink()) throw new Error(`产物不能是符号链接：${expected}`);
-    if (expected.endsWith("/") || expected.endsWith("\\")) {
-      if (!stat.isDirectory()) throw new Error(`期望目录但实际不是目录：${expected}`);
-      if (walkFiles(target).length === 0) throw new Error(`期望目录为空：${expected}`);
-    } else if (!stat.isFile() || stat.size === 0) {
-      throw new Error(`期望文件不存在或为空：${expected}`);
+    const check = checkArtifactOnDisk(outDir, expected);
+    if (!check.ok) {
+      throw new Error(check.message.includes("缺少产物") ? `缺少期望产物：${expected}` : check.message);
     }
   }
 }

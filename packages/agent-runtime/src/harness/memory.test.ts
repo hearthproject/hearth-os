@@ -9,7 +9,13 @@ import { createMemoryTools, memoryIndexBlock } from "./memory.ts";
 describe("repository memory index", () => {
   const roots: string[] = [];
   afterEach(() => {
-    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+    for (const root of roots.splice(0)) {
+      try {
+        rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      } catch {
+        // Windows may hold a transient handle; cleanup is best effort.
+      }
+    }
   });
 
   function contextFor(root: string, out: string): AgentToolContext {

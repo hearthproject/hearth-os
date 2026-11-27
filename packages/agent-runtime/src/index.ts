@@ -37,3 +37,4 @@ export * from "./harness/agent-profiles.ts";
 export * from "./harness/goal.ts";
 export * from "./harness/memory.ts";
 export * from "./harness/hooks.ts";
+export * from "./harness/cassette.ts";
