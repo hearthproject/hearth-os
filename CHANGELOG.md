@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.9.0 - 2026-11-27
+
+### 团队模式改为执行器原生能力
+
+- “单 Agent / 团队”开关不再只对 Native 生效：Hearth 编排只读成员，Codex 使用原生 multi-agent，DSH 使用原生 Team；界面按负责人显示“Hearth 编排 / Codex 原生 / DSH 原生”。
+- 计划模式强制单 Agent（`forcedBy: "plan"`），不再出现“有团队策略但没有委派工具”的坏组合。
+- 执行器能力不足时自动降级为单 Agent，并保留 `degraded` 与 `reason`，不再用提示词假装团队已生效。
+
+### Codex 原生多 Agent
+
+- 托管 Codex（0.166.0）启用 `features.multi_agent`，线程上限 4、深度 1；单 Agent 模式显式关闭该 feature。
+- 新增 `0.124.0` 版本门槛与 `--version` 探测缓存；版本过低或无法解析时给出“更新执行器”或重试提示。
+- Codex SDK 不回传成员事件，界面明确显示“成员不可见”，只使用总量统计，不伪造 roster。
+
+### DSH 原生 Team
+
+- 团队运行时锁 `0.2.2-rc.1`：安装 `agent-team`、`tool-agent-team`、`agent-team-profile` 三个包；设置页新增“安装团队运行时”，失败重试不删除已装 SDK。
+- patch 在团队模式插入 `agent-team`（8 成员 / 256 任务）与 `tool-agent-team`（spawn/fork），并禁用 base subagent 与 fork 工具；单 Agent 模式只禁用、不插入。
+- 新增 DSH 团队通知与会话树事件映射，成员事件进入 Hearth roster，root session 心跳不算成员。
+
+### 证据、回执与恢复
+
+- `agent.mode` 运行前后各写一条；最终事件包含 `owner`、`guarantee`、`configApplied`、`observed`、`usage`，异常路径带 `failedBeforeOutcome`。
+- `run-evidence.json` 的 `agentMode` 取最终事件，可区分“请求团队”和“实际发生了什么”。
+- 新增 `subagent.blocked`：blocked 回执不完成计划步骤，只写 note；报告、transcript 与界面都显示真实状态。
+- 取消写 `cancelled` 而不是 failed；进程重启后 lost 成员补发一次 `subagent.failed`，界面不再永久转圈。
+- 成员事件带 `source` / `parentId` / `depth` / `structured`，roster 按 Hearth、Codex、DSH 分组；无成员时按执行器显示不同空态。
+
+### 修复
+
+- 修复 0.8.0 计划模式重置工具面后仍保留团队策略的问题。
+- 修复子代理失败报告不看 `signal.aborted`、把取消写成失败的问题。
+- 修复 `subagent.completed` 缺少结构化回执、lost 成员不发事件的问题。
+- 修复设置页看不到执行器团队能力、DSH 缺包只能靠运行失败才发现的问题。
+
+### 验证
+
+- `npm run typecheck` 通过；模式解析、调度器、子代理、Codex 配置、DSH patch/通知、事件存储测试通过。
+
 ## 0.8.0 - 2026-11-27
 
 ### 单 Agent / 团队双模式
