@@ -365,6 +365,12 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     if (!existing) {
       return reply.code(404).send({ error: "CONVERSATION_NOT_FOUND", message: "对话不存在" });
     }
+    if (parsed.data.settings?.collaborationMode === "plan" && options.goals?.findOpenForConversation(request.params.id)) {
+      return reply.code(409).send({
+        error: "PLAN_GOAL_CONFLICT",
+        message: "当前会话还有未结束的目标，请先结束目标再开启计划模式"
+      });
+    }
     let conversation = existing;
     if (parsed.data.title) conversation = store.renameConversation(request.params.id, parsed.data.title) ?? conversation;
     if (parsed.data.settings) conversation = store.updateConversationSettings(request.params.id, parsed.data.settings) ?? conversation;

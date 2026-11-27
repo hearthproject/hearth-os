@@ -267,6 +267,29 @@ describe("PlanService", () => {
     expect(store.getPlan(plan.id)?.planSha256).toBe(approved.planSha256);
   });
 
+  it("switches the execution executor when retrying a failed build", async () => {
+    const { service, conversation, plans } = setup();
+    const plan = plans.create({
+      conversationId: conversation.id,
+      objective: "Retry elsewhere",
+      textInput: "Retry elsewhere",
+      planningExecutorId: "native",
+      execution: { executorId: "native", taskKind: "general", networkHosts: [], expectedOutputs: [] }
+    });
+    readyPlan(plans, plan.planningTaskId!, "run-retry-executor");
+    const approved = await plans.action(plan.id, "approve");
+    expect(service.requireTask(approved.executionTaskId!).executorId).toBe("native");
+
+    plans.onTaskFailed(approved.executionTaskId!, "boom");
+    expect(plans.get(plan.id)?.stage).toBe("failed");
+
+    const retried = await plans.action(plan.id, "retry", { executorId: "codex" });
+    expect(retried.stage).toBe("executing");
+    expect(retried.execution?.executorId).toBe("codex");
+    expect(service.requireTask(retried.executionTaskId!).executorId).toBe("codex");
+    expect(service.requireTask(retried.executionTaskId!).mode).toBe("build");
+  });
+
   it("keeps an interrupted build waiting for approval after a restart", async () => {
     const { root, service, conversation, plans, scheduler } = setup();
     const plan = plans.create({ conversationId: conversation.id, objective: "Restart", textInput: "Restart" });

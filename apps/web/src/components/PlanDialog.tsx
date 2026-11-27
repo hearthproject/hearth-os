@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, ClipboardList, Loader2, Pencil, Plus, Send, Trash2, X } from "lucide-react";
+import { Check, ClipboardList, Loader2, Pencil, Plus, RefreshCw, Send, Trash2, X } from "lucide-react";
 import type { PlanActionName, PlanView } from "@hearth/core";
 import { Markdown } from "./Markdown.tsx";
 import { executorLabel } from "../lib/labels.ts";
@@ -48,6 +48,7 @@ export function PlanDialog({
   const editedMarkdown = editorMode === "raw" ? draftPlan : serializePlanBlocks(blocks);
   const currentPlan = editingPlan ? editedMarkdown : planMarkdown;
   const canApprove = view.stage === "awaiting_approval" && Boolean(currentPlan.trim());
+  const canRetry = view.stage === "failed" && Boolean(planMarkdown.trim());
   const canReplan = view.stage === "awaiting_approval" || view.stage === "failed";
   const planningExecutorText = executorLabel(view.planningExecutorId ?? view.execution?.executorId);
   const executionExecutorText = executorLabel(executionExecutorId);
@@ -127,7 +128,7 @@ export function PlanDialog({
           <span><b>规划执行器</b>{planningExecutorText}</span>
           <span>
             <b>执行执行器</b>
-            {canApprove ? (
+            {canApprove || canRetry ? (
               <select
                 aria-label="计划执行执行器"
                 value={executionExecutorId}
@@ -274,6 +275,22 @@ export function PlanDialog({
           )}
         </div>
         <footer className="plan-dialog-actions">
+          {canRetry && (
+            <button
+              type="button"
+              className="plan-dialog-action primary"
+              disabled={busy}
+              onClick={() => onAction("retry", {
+                ...(executionExecutorId !== view.execution?.executorId ? { executorId: executionExecutorId } : {})
+              })}
+            >
+              {busy ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
+              <span>
+                <strong>用 {executionExecutorText} 重试</strong>
+                <small>保留已批准的计划和 SHA-256，换执行器重新执行</small>
+              </span>
+            </button>
+          )}
           {canApprove && (
             <button
               type="button"
@@ -300,7 +317,7 @@ export function PlanDialog({
               </span>
             </button>
           )}
-          {!canApprove && !canReplan && (
+          {!canApprove && !canReplan && !canRetry && (
             <p className="plan-dialog-stage">当前阶段没有可执行的计划动作。</p>
           )}
           <button type="button" className="plan-dialog-close" onClick={onClose}>关闭</button>

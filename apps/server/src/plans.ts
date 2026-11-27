@@ -153,7 +153,7 @@ export class PlanService {
     if (action === "approve") return this.approve(plan, options.planMarkdown, options.executorId);
     if (action === "replan") return this.replan(plan, options.note);
     if (action === "cancel") return this.cancel(plan);
-    return this.retry(plan);
+    return this.retry(plan, options.executorId);
   }
 
   continuePlanning(
@@ -413,9 +413,9 @@ export class PlanService {
     return normalizePlan(next);
   }
 
-  private retry(plan: PlanRecord): PlanView {
+  private retry(plan: PlanRecord, executorId?: ExecutorId): PlanView {
     if (!plan.planMarkdown?.trim()) throw new PlanStateError("PLAN_STATE_INVALID", "没有可重试的计划正文");
-    return this.approve({ ...plan, stage: "awaiting_approval", executionTaskId: null, error: null });
+    return this.approve({ ...plan, stage: "awaiting_approval", executionTaskId: null, error: null }, undefined, executorId);
   }
 
   private createPlanningTask(plan: PlanRecord, text: string, mcpServerIds?: string[]): TaskRecord {

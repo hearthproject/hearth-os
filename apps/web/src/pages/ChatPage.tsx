@@ -1109,6 +1109,7 @@ export function ChatPage() {
     if (hasActiveGoal || goalMode) {
       if (!(await exitToBuildMode("切换到新的目标"))) return;
     }
+    setPlanMode(false);
     const outgoing: OutgoingMessage = {
       text: argument,
       attachments: [],

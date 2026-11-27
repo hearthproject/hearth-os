@@ -1145,6 +1145,7 @@ describe("unified harness API", () => {
       });
       expect(planWhileGoal.statusCode, planWhileGoal.body).toBe(409);
       expect(planWhileGoal.json().error).toBe("PLAN_GOAL_CONFLICT");
+      expect(store.listChatMessages(conversation.id)).toHaveLength(before);
       const directPlan = await app.inject({
         method: "POST",
         url: "/api/plans",
@@ -1153,6 +1154,28 @@ describe("unified harness API", () => {
       expect(directPlan.statusCode, directPlan.body).toBe(409);
       expect(directPlan.json().error).toBe("PLAN_GOAL_CONFLICT");
 
+      const stalePlan = store.createConversation("stale plan toggle");
+      store.updateConversationSettings(stalePlan.id, { collaborationMode: "plan" });
+      const goalOverStalePlan = await app.inject({
+        method: "POST",
+        url: "/api/goals",
+        payload: {
+          conversationId: stalePlan.id,
+          objective: "goal clears stale plan",
+          start: false,
+          execution: { executorId: "native", taskKind: "general", expectedOutputs: [], networkHosts: [] }
+        }
+      });
+      expect(goalOverStalePlan.statusCode, goalOverStalePlan.body).toBe(201);
+      expect(store.getConversation(stalePlan.id)?.settings.collaborationMode).toBe("build");
+      const patchPlan = await app.inject({
+        method: "PATCH",
+        url: `/api/conversations/${stalePlan.id}`,
+        payload: { settings: { collaborationMode: "plan" } }
+      });
+      expect(patchPlan.statusCode, patchPlan.body).toBe(409);
+      expect(patchPlan.json().error).toBe("PLAN_GOAL_CONFLICT");
+
       const other = store.createConversation("plan conflict");
       const plan = await app.inject({
         method: "POST",
@@ -1160,6 +1183,7 @@ describe("unified harness API", () => {
         payload: { conversationId: other.id, objective: "active plan", start: false }
       });
       expect(plan.statusCode, plan.body).toBe(201);
+      const otherBefore = store.listChatMessages(other.id).length;
       const bothWhilePlan = await app.inject({
         method: "POST",
         url: "/api/chat",
@@ -1167,6 +1191,7 @@ describe("unified harness API", () => {
       });
       expect(bothWhilePlan.statusCode, bothWhilePlan.body).toBe(409);
       expect(bothWhilePlan.json().error).toBe("MODE_CONFLICT");
+      expect(store.listChatMessages(other.id)).toHaveLength(otherBefore);
       const goalWhilePlan = await app.inject({
         method: "POST",
         url: "/api/chat",
@@ -1174,6 +1199,7 @@ describe("unified harness API", () => {
       });
       expect(goalWhilePlan.statusCode, goalWhilePlan.body).toBe(409);
       expect(goalWhilePlan.json().error).toBe("GOAL_PLAN_CONFLICT");
+      expect(store.listChatMessages(other.id)).toHaveLength(otherBefore);
       const directGoal = await app.inject({
         method: "POST",
         url: "/api/goals",

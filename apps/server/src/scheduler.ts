@@ -2659,7 +2659,12 @@ export class HearthScheduler {
       if (executorId === "native" && (!nativeSettings || !chatModelConfigured(nativeSettings))) {
         throw new Error("当前执行器还没有绑定可用模型。请在对话输入框或执行器设置中选择模型档案，然后重试。");
       }
-      const resumeState = executorId === "native" && !handoff ? this.restoreResumeState(taskId, taskRoot, Boolean(pendingInput)) : undefined;
+      // A run only owns the resumable native checkpoint while it remains the
+      // task's current binding. Goal executor switches clear currentRunId so a
+      // later round cannot restore a pre-switch checkpoint from any executor.
+      const resumeState = executorId === "native" && !handoff && task.currentRunId !== null
+        ? this.restoreResumeState(taskId, taskRoot, Boolean(pendingInput))
+        : undefined;
       const project = task.projectId ? this.service.store.getLocalProject(task.projectId) : null;
       const worktree = task.projectId && project?.defaultBranch && !task.inputs.some((input) => input.kind === "github")
         ? this.worktrees.ensure(task)

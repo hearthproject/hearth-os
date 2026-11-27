@@ -235,6 +235,11 @@ export class GoalService {
       commandsApprovedAt: null
     };
     this.appendGoal("goal.created", goal);
+    if (input.conversationId) {
+      // 目标与计划模式互斥：开始一个目标必须落掉残留的 Plan 开关，
+      // 否则后续普通消息会被 PLAN_GOAL_CONFLICT 永久挡住。
+      this.service.store.updateConversationSettings(input.conversationId, { collaborationMode: "build" });
+    }
     return goal;
   }
 
