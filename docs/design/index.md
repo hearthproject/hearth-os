@@ -63,7 +63,7 @@ TypeScript 是语言，Node.js 是运行时，两者不是同一层，也不是�
 
 ## 模块地图与关键边界
 
-下面二十一个模块是并列阅读的设计取舍说明。它们共同覆盖从用户入口到长期运行的全部产品判断，不按代码目录组织。想知道“代码现在实际怎么拼起来”，请转到[代码架构说明](/architecture/)；设计页回答“为什么这样设计”，架构页回答“当前实现是什么”。
+下面二十二个模块是并列阅读的设计取舍说明。它们共同覆盖从用户入口到长期运行的全部产品判断，不按代码目录组织。想知道“代码现在实际怎么拼起来”，请转到[代码架构说明](/architecture/)；设计页回答“为什么这样设计”，架构页回答“当前实现是什么”。
 
 | 模块 | 先解决什么 |
 |---|---|
@@ -74,6 +74,7 @@ TypeScript 是语言，Node.js 是运行时，两者不是同一层，也不是�
 | [控制面与授权](/design/control) | 判断什么时候观察、建议、执行或停下，并把权限收在明确范围内 |
 | [执行器与路由](/design/executors) | 用不同专长完成不同工作，而不是把所有事情交给一个万能模型 |
 | [原生 Agent Runtime](/design/native-agent-runtime) | 自建通用执行内核，统一模型协议、工具面、压缩、委派、Worktree、MCP、预算和检查点 |
+| [单 Agent 与团队模式](/design/agent-modes) | 用会话级开关选择单人或团队编排，团队只读、证据可审计 |
 | [Windows 原生沙箱](/design/sandbox) | 用 AppContainer、ACL、Job Object 与网络 deny/open 限制 shell 的真实影响 |
 | [编码 Harness](/design/coding-harness) | 让编码任务有命令策略、逐轮快照、hooks 和可核对的完成断言 |
 | [项目与工作区](/design/projects) | 把任意本地文件夹变成项目：Git 用隔离 Worktree，非 Git 原地执行并给出改动清单 |

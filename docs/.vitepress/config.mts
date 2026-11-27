@@ -38,6 +38,7 @@ const zhDesignSidebar = [
       { text: '控制面与授权', link: '/design/control' },
       { text: '执行器与路由', link: '/design/executors' },
       { text: '原生 Agent Runtime', link: '/design/native-agent-runtime' },
+      { text: '单 Agent 与团队模式', link: '/design/agent-modes' },
       { text: 'Windows 原生沙箱', link: '/design/sandbox' },
       { text: '编码 Harness', link: '/design/coding-harness' },
       { text: '项目与工作区', link: '/design/projects' },
