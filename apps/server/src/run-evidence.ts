@@ -22,6 +22,11 @@ export interface RunEvidenceInput {
   operations: RunEvidenceOperation[];
   artifacts: ArtifactRecord[];
   recovery: ContextItem[];
+  agentMode?: {
+    requested: "single" | "team";
+    effective: "single" | "team" | "executor-managed";
+    executorId: string;
+  } | null;
   now?: Date;
 }
 
@@ -31,6 +36,11 @@ export interface RunEvidence {
   generatedAt: string;
   task: Pick<TaskRecord, "id" | "title" | "status" | "executorId" | "error">;
   run: Pick<RunRecord, "id" | "attempt" | "status" | "threadId" | "startedAt" | "endedAt" | "failure" | "usage">;
+  agentMode?: {
+    requested: "single" | "team";
+    effective: "single" | "team" | "executor-managed";
+    executorId: string;
+  } | null;
   checkpoint: { seq: number; kind: string; path: string; sha256: string; eventSeq: number | null } | null;
   recovery: Array<{ phase: unknown; decision: unknown; reasons: unknown; content: string; createdAt: string }>;
   operations: RunEvidenceOperation[];
@@ -60,6 +70,7 @@ export function buildRunEvidence(input: RunEvidenceInput): RunEvidence {
       failure: input.run.failure,
       usage: input.run.usage
     },
+    ...(input.agentMode ? { agentMode: input.agentMode } : {}),
     checkpoint: input.checkpoint ? {
       seq: input.checkpoint.seq,
       kind: input.checkpoint.kind,

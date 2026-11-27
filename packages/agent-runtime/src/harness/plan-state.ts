@@ -63,6 +63,36 @@ export function setPlan(state: AgentToolState | undefined, plan: AgentPlan): voi
   state.todos = planToTodos(plan);
 }
 
+/** 子代理开始时把对应计划步骤标记为进行中，并记录 owner。 */
+export function startPlanStep(state: AgentToolState | undefined, stepId: string, owner: string): boolean {
+  const step = state?.plan?.steps.find((item) => item.id === stepId);
+  if (!state?.plan || !step) return false;
+  step.state = "in_progress";
+  step.owner = owner;
+  delete step.note;
+  state.todos = planToTodos(state.plan);
+  return true;
+}
+
+/** 子代理成功返回时完成对应步骤；不扩展步骤状态枚举。 */
+export function completePlanStep(state: AgentToolState | undefined, stepId: string, note?: string): boolean {
+  const step = state?.plan?.steps.find((item) => item.id === stepId);
+  if (!state?.plan || !step) return false;
+  step.state = "completed";
+  if (note) step.note = note;
+  state.todos = planToTodos(state.plan);
+  return true;
+}
+
+/** 子代理失败时保留原状态，只写原因，避免把失败投影成完成。 */
+export function notePlanStep(state: AgentToolState | undefined, stepId: string, note: string): boolean {
+  const step = state?.plan?.steps.find((item) => item.id === stepId);
+  if (!state?.plan || !step) return false;
+  step.note = note.slice(0, 400);
+  state.todos = planToTodos(state.plan);
+  return true;
+}
+
 /** todo_write 后调用：若存在 plan 则把状态回写，保持两者一致。 */
 export function syncPlanFromTodos(state: AgentToolState | undefined): void {
   if (!state?.plan || state.plan.steps.length === 0) return;

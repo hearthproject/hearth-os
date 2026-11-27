@@ -67,6 +67,7 @@ export interface ExecutorAttemptContext {
   executorSettings: ExecutorSettings;
   expectedOutputs: string[];
   mode?: "build" | "plan";
+  maxParallelTools?: number;
   activeThreadId?: string;
   extraNativeTools?: AgentTool[];
   skipBuiltinGoalTools?: boolean;
@@ -154,6 +155,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       ...(input.steering ? { steering: input.steering } : {}),
       expectedOutputs: input.expectedOutputs,
       ...(input.mode ? { mode: input.mode } : {}),
+      ...(input.maxParallelTools ? { maxParallelTools: input.maxParallelTools } : {}),
       onProgress: input.onProgress,
       onContextEvent: input.onNativeContextEvent,
       onCheckpoint: input.onNativeCheckpoint,

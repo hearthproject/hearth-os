@@ -4,18 +4,24 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeF
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { Ajv } from "ajv";
-import type { RunBudget, TaskPermissions, TaskRecord, TaskWorktree } from "@hearth/core";
+import type { AgentMode, RunBudget, RunUsage, TaskPermissions, TaskRecord, TaskWorktree } from "@hearth/core";
 import {
   zeroUsage,
   agentProfile,
   finishActiveWork,
   startActiveWork,
   deserializeAgentState,
+  completePlanStep,
+  notePlanStep,
+  startPlanStep,
   type AgentCheckpoint,
   type AgentResumeState,
   type AgentTool,
+  type AgentToolAuthorization,
+  type AgentToolAuthorizationRequest,
   type AgentToolResult,
   type HarnessMode,
+  type OperationLedger,
   type SubagentType
 } from "@hearth/agent-runtime";
 import { runNativeTask, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
@@ -26,7 +32,24 @@ import type { ManagedAgent, ManagedAgentSession, SubagentTaskManager } from "./s
 
 const MAX_SUBAGENTS = 4;
 const MAX_AGENT_DEPTH = 2;
-const MAX_TOTAL_SUBAGENTS = 8;
+export const MAX_TOTAL_SUBAGENTS = 8;
+export { MAX_SUBAGENTS };
+
+export interface SubagentFinishedInfo {
+  childId: string;
+  type: SubagentType;
+  title: string;
+  status: "completed" | "failed" | "cancelled";
+  durationMs: number;
+  usage?: RunUsage | undefined;
+  summary?: string | undefined;
+  structured?: unknown;
+  reportPath?: string | undefined;
+  transcriptPath: string;
+  error?: string | undefined;
+  branch?: string | undefined;
+  commit?: string | undefined;
+}
 
 export type SubagentRunner = (options: NativeRunOptions) => Promise<NativeRunResult>;
 
@@ -44,7 +67,16 @@ export interface SubagentToolOptions {
   depth?: number | undefined;
   compatibility?: boolean | undefined;
   manager?: SubagentTaskManager | undefined;
+  agentMode?: AgentMode | undefined;
+  allowedTypes?: SubagentType[] | undefined;
+  defaultOutputSchema?: Record<string, unknown> | undefined;
+  evidenceRoot?: string | undefined;
+  runId?: string | undefined;
+  taskId?: string | undefined;
+  operationLedger?: OperationLedger | undefined;
+  onAuthorizeTool?: ((request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>) | undefined;
   onStarted?: ((info: { childId: string; mode: "read-only" | "isolated-write"; title: string; type: SubagentType }) => void) | undefined;
+  onFinished?: ((info: SubagentFinishedInfo) => void) | undefined;
 }
 
 export function createAgentTool(options: SubagentToolOptions): AgentTool {
@@ -67,16 +99,22 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
   const runner = options.runner ?? runNativeTask;
   const maxSubagents = Math.max(1, Math.min(MAX_SUBAGENTS, options.maxSubagents ?? MAX_SUBAGENTS));
   const depth = options.depth ?? 0;
+  const allowedTypes: SubagentType[] = options.allowedTypes?.length
+    ? [...options.allowedTypes]
+    : ["explore", "plan", "review", "general-purpose"];
   let started = 0;
 
   return {
-    definition: compatibility ? delegationDefinition() : agentDefinition(),
+    definition: compatibility ? delegationDefinition() : agentDefinition(allowedTypes),
     async execute(input, context): Promise<AgentToolResult> {
       if (depth > MAX_AGENT_DEPTH) throw new Error(`子代理最多委派 ${MAX_AGENT_DEPTH} 层`);
       const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
       const parsed = compatibility ? parseDelegationArgs(args) : parseAgentArgs(args);
       if (!parsed.objective) throw new Error(compatibility ? "请提供子任务目标" : "请提供 prompt");
       if (parsed.objective.length > 20_000) throw new Error("子任务目标过长");
+      if (!allowedTypes.includes(parsed.type as SubagentType)) {
+        throw new Error(`当前 Agent 模式不支持子代理类型：${parsed.type || "未指定"}`);
+      }
       const profile = agentProfile(parsed.type);
       if (!profile) throw new Error(`未知子代理类型：${parsed.type}`);
       if (started >= maxSubagents) throw new Error(`每个任务最多启动 ${maxSubagents} 个子代理`);
@@ -86,7 +124,15 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
       const childId = subagentTaskId(options.task.id, profile.type);
       const childTitle = parsed.title || `${profile.type} ${started}`;
       if (profile.isolation === "worktree" && !options.task.projectId) throw new Error("general-purpose 子代理只能用于本地项目任务");
-      const transcriptPath = join(tmpdir(), "hearth-subagents", options.task.id.replace(/[^A-Za-z0-9._-]/g, "-"), `${childId}.jsonl`);
+
+      const safeParent = options.task.id.replace(/[^A-Za-z0-9._-]/g, "-") || "task";
+      const evidenceRoot = options.evidenceRoot ?? join(tmpdir(), "hearth-subagents", safeParent);
+      const evidenceDir = join(evidenceRoot, childId);
+      const transcriptPath = join(evidenceDir, "transcript.jsonl");
+      const checkpointPath = join(evidenceDir, "checkpoint.json");
+      const journalPath = join(evidenceDir, "journal.jsonl");
+      const childOutDir = join(evidenceDir, "out");
+      mkdirSync(childOutDir, { recursive: true });
       appendTranscript(transcriptPath, {
         at: new Date().toISOString(),
         event: "started",
@@ -96,22 +142,19 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
         prompt: parsed.objective
       });
 
-      const safeParent = options.task.id.replace(/[^A-Za-z0-9._-]/g, "-") || "task";
-      const checkpointPath = join(tmpdir(), "hearth-subagents", safeParent, `${childId}.checkpoint.json`);
-      const journalPath = join(tmpdir(), "hearth-subagents", safeParent, `${childId}.journal.jsonl`);
-
       const buildSession = (): ManagedAgentSession => {
         const worktree = profile.isolation === "worktree" ? createChildWorktree(childId, options) : null;
         const childRoot = worktree?.path ?? options.prepared.root;
-        const childOutDir = worktree ? join(worktree.path, ".hearth", "subagent-out") : options.prepared.outDir;
+        const outDir = worktree ? join(worktree.path, ".hearth", "subagent-out") : childOutDir;
+        if (worktree) mkdirSync(outDir, { recursive: true });
         const childTask = childTaskRecord({
           id: childId,
           title: childTitle,
           objective: parsed.objective,
           task: options.task,
           root: childRoot,
-          outDir: childOutDir,
-          permissions: profile.isolation === "worktree" ? isolatedWritePermissions(options, childRoot, childOutDir) : readOnlyPermissions(options, profile.tools)
+          outDir,
+          permissions: profile.isolation === "worktree" ? isolatedWritePermissions(options, childRoot, outDir) : readOnlyPermissions(options, profile.tools)
         });
         const narrow = (base: number | undefined, cap: number | undefined): number | undefined =>
           base === undefined ? cap : cap === undefined ? base : Math.min(base, cap);
@@ -122,19 +165,22 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
             ? { maxTokens: narrow(profile.budget.maxTokens, options.budget.maxTokens) }
             : {})
         };
-        const prompt = agentPrompt(profile.type, parsed.objective, options.task, profile.outputContract, parsed.outputSchema);
+        const outputSchema = parsed.outputSchema ?? options.defaultOutputSchema;
+        const canDelegate = depth < MAX_AGENT_DEPTH && profile.isolation !== "worktree";
+        const prompt = agentPrompt(profile.type, parsed.objective, options.task, profile.outputContract, outputSchema, canDelegate);
         const permissions = childTask.permissions ?? readOnlyPermissions(options, profile.tools);
         const delegationTool = compatibility ? "delegate_task" : "agent";
-        if (depth < MAX_AGENT_DEPTH && !permissions.tools.includes(delegationTool)) {
+        if (canDelegate && !permissions.tools.includes(delegationTool)) {
           permissions.tools = [...permissions.tools, delegationTool];
         }
         return {
           childId,
+          parentTaskId: options.task.id,
           childTitle,
           type: profile.type,
           objective: parsed.objective,
           childTask,
-          prepared: { root: childRoot, outDir: childOutDir },
+          prepared: { root: childRoot, outDir },
           permissions,
           budget,
           mode: profile.mode,
@@ -142,12 +188,13 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
           checkpointPath,
           journalPath,
           transcriptPath,
-          ...(parsed.outputSchema ? { outputSchema: parsed.outputSchema } : {}),
+          ...(outputSchema ? { outputSchema } : {}),
           ...(worktree ? { worktree } : {})
         };
       };
 
       const session = buildSession();
+      if (parsed.stepId) startPlanStep(context.state, parsed.stepId, childId);
       options.onStarted?.({
         childId,
         mode: profile.isolation === "worktree" ? "isolated-write" : "read-only",
@@ -155,6 +202,7 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
         type: profile.type
       });
 
+      const runStartedAt = Date.now();
       const runAgentJob = async (signal: AbortSignal, extra?: string): Promise<AgentToolResult> =>
         executeAgentJob({ runner, options, session, signal, ...(extra ? { extra } : {}) });
 
@@ -163,29 +211,68 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
         try {
           const result = await runAgentJob(signal, extra);
           finishActiveWork(context.state, childId, "completed");
+          if (parsed.stepId) completePlanStep(context.state, parsed.stepId, `${childTitle} 已完成`);
+          const metadata = (result.metadata ?? {}) as Record<string, unknown>;
+          options.onFinished?.({
+            childId,
+            type: profile.type as SubagentType,
+            title: childTitle,
+            status: "completed",
+            durationMs: Date.now() - runStartedAt,
+            usage: result.usage,
+            summary: result.summary ?? summarizeToolResult(result.content),
+            ...(metadata.structured === undefined ? {} : { structured: metadata.structured }),
+            ...(typeof metadata.reportPath === "string" ? { reportPath: metadata.reportPath } : {}),
+            transcriptPath,
+            ...(session.worktree ? { branch: session.worktree.branch } : {}),
+            ...(typeof metadata.commitSha === "string" ? { commit: metadata.commitSha } : {})
+          });
           return result;
         } catch (error) {
           finishActiveWork(context.state, childId, signal.aborted ? "cancelled" : "failed");
+          const failureMessage = errorMessage(error);
+          if (parsed.stepId && !signal.aborted) notePlanStep(context.state, parsed.stepId, failureMessage);
+          const reportPath = writeAgentFailureReport(session, error, runStartedAt);
+          options.onFinished?.({
+            childId,
+            type: profile.type as SubagentType,
+            title: childTitle,
+            status: signal.aborted ? "cancelled" : "failed",
+            durationMs: Date.now() - runStartedAt,
+            reportPath,
+            transcriptPath,
+            error: failureMessage
+          });
           throw error;
         }
       };
 
-      if (parsed.runInBackground) {
-        if (!options.manager) throw new Error("后台子代理需要 manager 支持");
+      if (options.manager) {
         const job = options.manager.start(
           { id: childId, type: profile.type, title: childTitle, transcriptPath, session, checkpointPath, journalPath },
           launch,
           (message, signal) => launch(signal, message)
         );
-        return {
-          content: `agentId: ${job.id}\nstatus: running\ntype: ${profile.type}\ntranscript: ${transcriptPath}\n请用 agent_wait 等待结果，或继续其他工作；agent_status 可查看状态，agent_kill 可取消。`,
-          metadata: { agentId: job.id, subagentType: profile.type, agentStatus: "running", transcriptPath }
-        };
+        if (parsed.runInBackground) {
+          return {
+            content: `agentId: ${job.id}\nstatus: running\ntype: ${profile.type}\ntranscript: ${transcriptPath}\n请用 agent_wait 等待结果，或继续其他工作；agent_status 可查看状态，agent_kill 可取消。`,
+            metadata: { agentId: job.id, subagentType: profile.type, agentStatus: "running", transcriptPath }
+          };
+        }
+        return job.promise ?? launch(options.signal);
       }
-
+      if (parsed.runInBackground) throw new Error("后台子代理需要 manager 支持");
       return launch(options.signal);
     }
   };
+}
+
+function summarizeToolResult(content: string): string {
+  return content.split("\n").filter(Boolean).slice(0, 6).join("\n").slice(0, 800);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function executeAgentJob(input: {
@@ -199,10 +286,10 @@ async function executeAgentJob(input: {
   const objective = extra ? `${session.objective}\n\n## Follow-up instruction\n${extra}` : session.objective;
   const profile = agentProfile(session.type);
   if (!profile) throw new Error(`未知子代理类型：${session.type}`);
-  const prompt = agentPrompt(session.type, objective, options.task, profile.outputContract, session.outputSchema);
+  const prompt = agentPrompt(session.type, objective, options.task, profile.outputContract, session.outputSchema, (options.depth ?? 0) < MAX_AGENT_DEPTH && profile.isolation !== "worktree");
   const resume = loadAgentResume(session);
   const childDepth = options.depth ?? 0;
-  const childDelegation = childDepth < MAX_AGENT_DEPTH
+  const childDelegation = childDepth < MAX_AGENT_DEPTH && profile.isolation !== "worktree"
     ? [createDispatchTool({
         ...options,
         depth: childDepth + 1,
@@ -222,6 +309,11 @@ async function executeAgentJob(input: {
     signal: AbortSignal.any([options.signal, signal]),
     expectedOutputs: [],
     journalPath: session.journalPath,
+    ...(options.runId ? { runId: options.runId } : {}),
+    ...(options.taskId ? { taskId: options.taskId } : {}),
+    ...(options.operationLedger ? { operationLedger: options.operationLedger } : {}),
+    ...(options.onAuthorizeTool ? { onAuthorizeTool: options.onAuthorizeTool } : {}),
+    ...(childDelegation.length > 0 || options.agentMode === "team" ? { maxParallelTools: 4 } : {}),
     ...(childDelegation.length > 0 ? { extraTools: childDelegation } : {}),
     ...(resume ? { resume } : {}),
     ...(options.manager ? { onProgress: () => options.manager!.progress(session.childId) } : {}),
@@ -240,6 +332,12 @@ async function executeAgentJob(input: {
   const structuredLine = structured === undefined ? [] : [`structured_output: ${JSON.stringify(structured)}`];
 
   if (!session.worktree) {
+    const reportPath = writeAgentReport(session, {
+      status: "completed",
+      summary,
+      usage,
+      ...(structured === undefined ? {} : { structured })
+    });
     appendTranscript(session.transcriptPath, {
       at: new Date().toISOString(),
       event: "completed",
@@ -248,6 +346,7 @@ async function executeAgentJob(input: {
       summary,
       usage,
       ...(structured === undefined ? {} : { structured }),
+      reportPath,
       messages: result.messages ?? []
     });
     return {
@@ -258,14 +357,30 @@ async function executeAgentJob(input: {
         `summary: ${summary}`,
         ...structuredLine,
         `transcript: ${session.transcriptPath}`,
+        `report: ${reportPath}`,
         `checkpoint: ${session.checkpointPath}`
       ].join("\n"),
       usage,
-      metadata: { agentId: session.childId, subagentType: session.type, agentStatus: "completed", transcriptPath: session.transcriptPath }
+      metadata: {
+        agentId: session.childId,
+        subagentType: session.type,
+        agentStatus: "completed",
+        transcriptPath: session.transcriptPath,
+        reportPath,
+        ...(structured === undefined ? {} : { structured })
+      }
     };
   }
 
   const commit = commitChildWorktree(session.worktree.path, options.task.id, session.childTitle);
+  const reportPath = writeAgentReport(session, {
+    status: "completed",
+    summary,
+    usage,
+    ...(structured === undefined ? {} : { structured }),
+    branch: session.worktree.branch,
+    commit
+  });
   appendTranscript(session.transcriptPath, {
     at: new Date().toISOString(),
     event: "completed",
@@ -276,6 +391,7 @@ async function executeAgentJob(input: {
     ...(structured === undefined ? {} : { structured }),
     branch: session.worktree.branch,
     commit,
+    reportPath,
     messages: result.messages ?? []
   });
   return {
@@ -288,11 +404,91 @@ async function executeAgentJob(input: {
       `branch: ${session.worktree.branch}`,
       `commit: ${commit}`,
       `transcript: ${session.transcriptPath}`,
+      `report: ${reportPath}`,
       "结果尚未合并。请检查该分支和提交后，由父任务手动 cherry-pick。"
     ].join("\n"),
     usage,
-    metadata: { agentId: session.childId, subagentType: session.type, agentStatus: "completed", branch: session.worktree.branch, commitSha: commit, transcriptPath: session.transcriptPath }
+    metadata: {
+      agentId: session.childId,
+      subagentType: session.type,
+      agentStatus: "completed",
+      branch: session.worktree.branch,
+      commitSha: commit,
+      transcriptPath: session.transcriptPath,
+      reportPath,
+      ...(structured === undefined ? {} : { structured })
+    }
   };
+}
+
+/** Stable, task-scoped receipt used by the Lead and by post-run auditing. */
+function writeAgentReport(session: ManagedAgentSession, report: {
+  status: "completed" | "failed" | "cancelled";
+  summary?: string;
+  error?: string;
+  usage?: RunUsage;
+  structured?: unknown;
+  branch?: string;
+  commit?: string;
+}): string {
+  const path = join(dirname(session.transcriptPath), "report.json");
+  const startedAt = session.childTask.createdAt;
+  const endedAt = new Date().toISOString();
+  const body = {
+    version: 1,
+    agentId: session.childId,
+    parentTaskId: session.parentTaskId ?? null,
+    type: session.type,
+    title: session.childTitle,
+    objective: session.objective,
+    status: report.status,
+    startedAt,
+    endedAt,
+    durationMs: Math.max(0, Date.now() - new Date(startedAt).getTime()),
+    ...(report.usage ? { usage: report.usage } : {}),
+    ...(report.summary ? { summary: report.summary } : {}),
+    ...(report.structured === undefined ? {} : { structured: report.structured }),
+    ...(report.error ? { error: report.error } : {}),
+    ...(report.branch ? { branch: report.branch } : {}),
+    ...(report.commit ? { commit: report.commit } : {}),
+    transcript: session.transcriptPath,
+    checkpoint: session.checkpointPath
+  };
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(body, null, 2)}\n`, "utf8");
+  } catch {
+    // Evidence is best-effort; a failed write must not change the child result.
+  }
+  return path;
+}
+
+function writeAgentFailureReport(session: ManagedAgentSession, error: unknown, startedAtMs: number): string {
+  const path = join(dirname(session.transcriptPath), "report.json");
+  const message = errorMessage(error);
+  const body = {
+    version: 1,
+    agentId: session.childId,
+    parentTaskId: session.parentTaskId ?? null,
+    type: session.type,
+    title: session.childTitle,
+    objective: session.objective,
+    status: "failed",
+    startedAt: new Date(startedAtMs).toISOString(),
+    endedAt: new Date().toISOString(),
+    durationMs: Math.max(0, Date.now() - startedAtMs),
+    error: message,
+    transcript: session.transcriptPath,
+    checkpoint: session.checkpointPath
+  };
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(body, null, 2)}\n`, "utf8");
+  } catch {
+    // Best-effort.
+  }
+  appendTranscript(session.transcriptPath, { at: new Date().toISOString(), event: "failed", agentId: session.childId, error: message });
+  return path;
 }
 
 function loadAgentResume(session: ManagedAgentSession): AgentResumeState | undefined {
@@ -404,16 +600,17 @@ function childTaskRecord(input: {
   };
 }
 
-function agentDefinition(): AgentTool["definition"] {
+function agentDefinition(allowedTypes: SubagentType[]): AgentTool["definition"] {
   return {
     name: "agent",
-    description: "Start a typed subagent with its own context. explore/plan/review are read-only; general-purpose writes in an isolated worktree. Subagents cannot delegate further.",
+    description: "Start a typed subagent with its own context. Team v1 exposes read-only types (explore/plan/review); the Lead is the only writer. A subagent may delegate one more level when capacity allows. The final answer must be a JSON receipt when a schema is supplied.",
     parameters: {
       type: "object",
       properties: {
-        subagent_type: { type: "string", enum: ["explore", "plan", "review", "general-purpose"], description: "explore locates code, plan designs steps, review checks a diff, general-purpose implements in a worktree" },
+        subagent_type: { type: "string", enum: allowedTypes, description: "explore locates code, plan designs steps, review checks a diff; all members are read-only in Team v1" },
         description: { type: "string", description: "3-8 word label shown to the parent and UI" },
-        prompt: { type: "string", description: "Self-contained task; the child cannot see the parent conversation" },
+        prompt: { type: "string", description: "Self-contained task; the child cannot see the parent conversation. Include boundaries, deliverables and evidence requirements." },
+        stepId: { type: "string", description: "Optional plan step id this member owns; completing the member marks the step completed" },
         run_in_background: { type: "boolean", description: "Return immediately and continue in the background" },
         maxTurns: { type: "number", description: "Optional turn cap for this child, bounded by the profile default" },
         output_schema: { type: "object", description: "Optional JSON Schema the child's final answer must satisfy; validated before the child is marked completed" }
@@ -441,19 +638,28 @@ function delegationDefinition(): AgentTool["definition"] {
   };
 }
 
-function parseAgentArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; maxTurns?: number; runInBackground?: boolean; outputSchema?: Record<string, unknown> } {
+function parseAgentArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; stepId?: string; maxTurns?: number; runInBackground?: boolean; outputSchema?: Record<string, unknown> } {
   const type = typeof args.subagent_type === "string" ? args.subagent_type : "";
   const objective = typeof args.prompt === "string" ? args.prompt.trim() : "";
   const title = typeof args.description === "string" ? args.description.trim().slice(0, 120) : "";
+  const stepId = typeof args.stepId === "string" ? args.stepId.trim().slice(0, 80) : "";
   const maxTurns = Number.isFinite(args.maxTurns) ? Math.max(1, Math.floor(Number(args.maxTurns))) : undefined;
   const runInBackground = args.run_in_background === true;
   const outputSchema = args.output_schema && typeof args.output_schema === "object" && !Array.isArray(args.output_schema)
     ? args.output_schema as Record<string, unknown>
     : undefined;
-  return { type, objective, title, ...(maxTurns ? { maxTurns } : {}), ...(runInBackground ? { runInBackground: true } : {}), ...(outputSchema ? { outputSchema } : {}) };
+  return {
+    type,
+    objective,
+    title,
+    ...(stepId ? { stepId } : {}),
+    ...(maxTurns ? { maxTurns } : {}),
+    ...(runInBackground ? { runInBackground: true } : {}),
+    ...(outputSchema ? { outputSchema } : {})
+  };
 }
 
-function parseDelegationArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; maxTurns?: number; runInBackground?: boolean; outputSchema?: Record<string, unknown> } {
+function parseDelegationArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; stepId?: string; maxTurns?: number; runInBackground?: boolean; outputSchema?: Record<string, unknown> } {
   const objective = typeof args.objective === "string" ? args.objective.trim() : "";
   const title = typeof args.title === "string" ? args.title.trim().slice(0, 120) : "";
   const mode = args.mode === "isolated-write" ? "general-purpose" : args.mode === "read-only" ? "explore" : "";
@@ -486,14 +692,17 @@ function isolatedWritePermissions(options: SubagentToolOptions, root: string, ou
   };
 }
 
-function agentPrompt(type: string, objective: string, parent: TaskRecord, outputContract: string, outputSchema?: Record<string, unknown>): string {
+function agentPrompt(type: string, objective: string, parent: TaskRecord, outputContract: string, outputSchema: Record<string, unknown> | undefined, canDelegate: boolean): string {
   return [
     `你是一个 ${type} 子代理，只负责下面这段子任务。父任务：${parent.title}`,
     `目标：${objective}`,
     `输出契约：${outputContract}`,
     ...(outputSchema ? [`最终回答必须是一个 JSON 值，严格满足以下 JSON Schema，不要包裹额外说明：\n${JSON.stringify(outputSchema)}`] : []),
     "上下文是隔离的：不要假设父代理知道你的中间过程，结论必须自带文件路径、行号和证据。",
-    "不要做超出目标的扩展，不要请求用户确认，不要委派其他子代理。"
+    canDelegate
+      ? "如果确实需要拆分，还可以再委派一层只读子代理；不要超过深度上限，也不要为了凑人数而拆分。"
+      : "不要委派其他子代理。",
+    "不要做超出目标的扩展，不要请求用户确认。"
   ].join("\n");
 }
 

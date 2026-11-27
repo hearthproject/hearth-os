@@ -123,6 +123,8 @@ export interface AgentToolMetadata {
   branch?: string;
   commitSha?: string;
   transcriptPath?: string;
+  reportPath?: string;
+  structured?: unknown;
   exposedTools?: string[];
   matched?: boolean;
   timedOut?: boolean;

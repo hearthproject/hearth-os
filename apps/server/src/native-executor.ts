@@ -117,6 +117,8 @@ export interface NativeRunOptions {
   journalSink?: JournalSink;
   goalRoot?: string;
   maxGoalRounds?: number;
+  /** Team mode raises the per-turn tool concurrency so independent members run in parallel. */
+  maxParallelTools?: number;
   /** Host-managed goal tasks bind get_goal/update_goal themselves. */
   skipBuiltinGoalTools?: boolean;
   retryPolicy?: RetryPolicy;
@@ -262,9 +264,13 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       }
     });
   const availableTools = toolsForRun.map((tool) => tool.definition.name);
-  const directTools = (options.mode ?? "build") === "plan"
+  const baseDirectTools = (options.mode ?? "build") === "plan"
     ? [...NATIVE_PLAN_TOOL_NAMES]
     : taskProfile.directTools;
+  const delegationTools = (options.extraTools ?? [])
+    .map((tool) => tool.definition.name)
+    .filter((name) => name === "agent" || name === "delegate_task");
+  const directTools = [...new Set([...baseDirectTools, ...delegationTools])];
   const goalBlock = !directRead && !options.isSubagent && !options.skipBuiltinGoalTools ? goalContinuationPrompt(options.prepared.root) : null;
   const memoryIndex = coding ? memoryIndexBlock(options.prepared.root) : null;
   const projectDossier = coding && !options.isSubagent && options.task.projectId
@@ -326,7 +332,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     profile,
     mode: options.mode ?? "build",
     toolTimeoutMs: taskProfile.toolTimeoutMs,
-    maxParallelTools: taskProfile.maxParallelTools,
+    maxParallelTools: options.maxParallelTools ?? taskProfile.maxParallelTools,
     keepRecentToolOutputs: taskProfile.keepRecentToolOutputs,
     directTools,
     deferRemaining: taskProfile.deferRemaining,

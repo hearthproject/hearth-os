@@ -27,6 +27,7 @@ export * from "./harness/search.ts";
 export * from "./harness/todo.ts";
 export * from "./harness/verification.ts";
 export * from "./harness/plan.ts";
+export * from "./harness/plan-state.ts";
 export * from "./harness/snapshots.ts";
 export * from "./harness/command-policy.ts";
 export * from "./harness/sandbox.ts";

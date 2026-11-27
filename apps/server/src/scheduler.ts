@@ -63,7 +63,8 @@ import type { LibraryMcpLaunch } from "./library/mcp-runtime.ts";
 import { mcpBridgeLaunch } from "./mcp-bridge-runtime.ts";
 import { OntologyService } from "./ontology.ts";
 import { createPersonalReadTools } from "./personal-tools.ts";
-import { createAgentTool, createSubagentResumeHandler, createSubagentTool } from "./subagents.ts";
+import { createAgentTool, createSubagentResumeHandler, createSubagentTool, MAX_SUBAGENTS, MAX_TOTAL_SUBAGENTS, type SubagentFinishedInfo } from "./subagents.ts";
+import { agentModePrompt, resolveAgentMode, TEAM_AGENT_TYPES, TEAM_RECEIPT_SCHEMA } from "./agent-mode.ts";
 import { createAgentLifecycleTools, SubagentTaskManager } from "./subagent-manager.ts";
 import { createJobTools } from "./job-tools.ts";
 import { OntologyWriter } from "./ontology-writer.ts";
@@ -1862,7 +1863,8 @@ export class HearthScheduler {
         checkpoint: this.service.store.latestRunCheckpoint(runId),
         operations,
         artifacts: this.service.store.listArtifacts(taskId),
-        recovery: this.service.store.listContextItems(taskId, { limit: 100 }).items
+        recovery: this.service.store.listContextItems(taskId, { limit: 100 }).items,
+        agentMode: this.agentModeEvidenceForRun(taskId, runId)
       });
       mkdirSync(outDir, { recursive: true });
       writeFileSync(join(outDir, "run-evidence.json"), `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
@@ -1870,6 +1872,25 @@ export class HearthScheduler {
       // Evidence is diagnostic; a write failure must never mask the real outcome.
     }
   }
+  private agentModeEvidenceForRun(taskId: string, runId: string): {
+    requested: "single" | "team";
+    effective: "single" | "team" | "executor-managed";
+    executorId: string;
+  } | null {
+    const event = this.service.store.listEvents(0, taskId)
+      .find((item) => item.runId === runId && item.type === "agent.mode");
+    const payload = event?.payload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+    const value = payload as Record<string, unknown>;
+    const requested = value.requested === "team" ? "team" : "single";
+    const effective = value.effective === "team" ? "team" : value.effective === "single" ? "single" : "executor-managed";
+    return {
+      requested,
+      effective,
+      executorId: typeof value.executorId === "string" ? value.executorId : "native"
+    };
+  }
+
   private async runTask(startingTask: TaskRecord): Promise<void> {
     const taskId = startingTask.id;
     let lease: TaskLease;
@@ -2408,6 +2429,15 @@ export class HearthScheduler {
     const { task, run, executorId, taskRoot, outDir, handoff, pendingInput, controller, budget, goalPrompt } = input;
     const taskId = task.id;
     const runId = run.id;
+    const requestedAgentMode = this.service.conversationSettings(task.conversationId)?.agentMode ?? "single";
+    const resolvedAgentMode = resolveAgentMode(requestedAgentMode, executorId);
+    const modeEvent = this.service.store.appendEvent({
+      type: "agent.mode",
+      taskId,
+      runId,
+      payload: { ...resolvedAgentMode, at: new Date().toISOString() }
+    });
+    this.service.bus.publish(modeEvent);
     try {
       this.recordRunInput(task, run, pendingInput);
       const expectedOutputs = expectedOutputsForTask(task);
@@ -2580,6 +2610,7 @@ export class HearthScheduler {
           : input.resumePrompt;
       }
       if (conversationBrief) prompt = `${prompt}\n\n${conversationBrief}`;
+      prompt = `${prompt}\n\n${agentModePrompt(resolvedAgentMode.requested, executorId)}`;
       const extraNativeTools: import("@hearth/agent-runtime").AgentTool[] = createPersonalReadTools({
         service: this.service,
         ontology: this.ontology
@@ -2614,32 +2645,38 @@ export class HearthScheduler {
       let subagentManager: SubagentTaskManager | undefined;
       if (this.library) extraNativeTools.push(...createLibraryTools(this.library));
       if (this.skills) extraNativeTools.push(...createSkillTools({ skills: this.skills, taskId, runId }));
-      if (executorId === "native") {
-        if (this.mcpServers) {
-          try {
-            extraNativeTools.push(...createMcpTools(this.mcpServers, selectedMcpIds));
-          } catch (error) {
-            this.capture({
-              taskId,
-              conversationId: task.conversationId ?? null,
-              runId,
-              executorId,
-              kind: "notice",
-              role: "system",
-              content: `MCP 工具未注入：${errorMessage(error)}`,
-              provenance: { source: "mcp", phase: "tool-binding" },
-              executorEventId: `mcp:tool-binding:${runId}`
-            });
-          }
+      if (executorId === "native" && this.mcpServers) {
+        try {
+          extraNativeTools.push(...createMcpTools(this.mcpServers, selectedMcpIds));
+        } catch (error) {
+          this.capture({
+            taskId,
+            conversationId: task.conversationId ?? null,
+            runId,
+            executorId,
+            kind: "notice",
+            role: "system",
+            content: `MCP 工具未注入：${errorMessage(error)}`,
+            provenance: { source: "mcp", phase: "tool-binding" },
+            executorEventId: `mcp:tool-binding:${runId}`
+          });
         }
-        const usedSubagents = this.service.store.listEvents(0, task.id)
-          .filter((event) => event.type === "subagent.delegated").length;
-        const remainingSubagents = 4 - usedSubagents;
-        const subagentTool = process.env.HEARTH_AGENT_TOOL === "0" ? createSubagentTool : createAgentTool;
+      }
+      if (executorId === "native" && resolvedAgentMode.effective === "team") {
         const safeTaskId = task.id.replace(/[^A-Za-z0-9._-]/g, "-") || "task";
         const manager = new SubagentTaskManager(4, join(taskRoot, ".hearth", "subagents", `${safeTaskId}.json`));
         subagentManager = manager;
-        if (subagentTool === createAgentTool) extraNativeTools.push(...createAgentLifecycleTools(manager));
+        const usedSubagents = this.service.store.listEvents(0, task.id)
+          .filter((event) => event.type === "subagent.delegated").length;
+        const remainingSubagents = Math.max(0, Math.min(
+          MAX_SUBAGENTS,
+          MAX_TOTAL_SUBAGENTS - usedSubagents,
+          manager.remainingTotal()
+        ));
+        const subagentTool = process.env.HEARTH_AGENT_TOOL === "0" ? createSubagentTool : createAgentTool;
+        if (subagentTool === createAgentTool && remainingSubagents > 0) {
+          extraNativeTools.push(...createAgentLifecycleTools(manager));
+        }
         controller.signal.addEventListener("abort", () => manager.cancelAll(), { once: true });
         const subagentOptions = {
           task,
@@ -2651,12 +2688,49 @@ export class HearthScheduler {
           parentWorktree: worktree,
           maxSubagents: remainingSubagents,
           manager,
+          agentMode: "team" as const,
+          allowedTypes: TEAM_AGENT_TYPES,
+          defaultOutputSchema: TEAM_RECEIPT_SCHEMA,
+          evidenceRoot: join(taskRoot, ".hearth", "agents"),
+          runId,
+          taskId,
+          ...(this.operationLedger ? { operationLedger: this.operationLedger } : {}),
+          onAuthorizeTool: (request: AgentToolAuthorizationRequest) => this.authorizeNativeTool({
+            task,
+            run,
+            request,
+            workspaceRoot: prepared.root,
+            signal: controller.signal
+          }),
           onStarted: (info: { childId: string; mode: "read-only" | "isolated-write"; title: string; type: SubagentType }) => {
             const event = this.service.store.appendEvent({
               type: "subagent.delegated",
               taskId,
               runId,
               payload: { ...info, at: new Date().toISOString() }
+            });
+            this.service.bus.publish(event);
+          },
+          onFinished: (info: SubagentFinishedInfo) => {
+            const event = this.service.store.appendEvent({
+              type: info.status === "completed" ? "subagent.completed" : "subagent.failed",
+              taskId,
+              runId,
+              payload: {
+                childId: info.childId,
+                type: info.type,
+                title: info.title,
+                status: info.status,
+                durationMs: info.durationMs,
+                ...(info.usage ? { usage: info.usage } : {}),
+                ...(info.summary ? { summary: info.summary.slice(0, 800) } : {}),
+                ...(info.reportPath ? { reportPath: info.reportPath } : {}),
+                transcriptPath: info.transcriptPath,
+                ...(info.error ? { error: info.error } : {}),
+                ...(info.branch ? { branch: info.branch } : {}),
+                ...(info.commit ? { commit: info.commit } : {}),
+                at: new Date().toISOString()
+              }
             });
             this.service.bus.publish(event);
           }
@@ -2694,6 +2768,7 @@ export class HearthScheduler {
         executorSettings: this.executorSettings(),
         expectedOutputs,
         mode: task.mode ?? "build",
+        ...(executorId === "native" && resolvedAgentMode.effective === "team" ? { maxParallelTools: 4 } : {}),
         ...(task.goalId ? { skipBuiltinGoalTools: true } : {}),
         ...(extraNativeTools.length > 0 ? { extraNativeTools } : {}),
         ...(Object.keys(taskMcpServers).length > 0 ? { mcpServers: taskMcpServers } : {}),

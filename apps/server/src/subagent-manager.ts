@@ -7,6 +7,7 @@ export type ManagedAgentStatus = "running" | "completed" | "failed" | "cancelled
 
 export interface ManagedAgentSession {
   childId: string;
+  parentTaskId?: string | undefined;
   childTitle: string;
   type: string;
   objective: string;
@@ -73,6 +74,10 @@ export class SubagentTaskManager {
 
   setResumeHandler(handler: ManagedAgentResumeHandler | null): void {
     this.resumeHandler = handler;
+  }
+
+  remainingTotal(): number {
+    return Math.max(0, this.maxTotal - this.jobs.size);
   }
 
   takeNotifications(): AgentMessage[] {
