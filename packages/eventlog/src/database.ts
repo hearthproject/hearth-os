@@ -242,7 +242,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   result_summary TEXT, waiting_kind TEXT, conversation_id TEXT, executor_id TEXT, task_kind TEXT,
   expected_outputs_json TEXT, permissions_json TEXT, pending_input TEXT,
   method_id TEXT, method_version INTEGER, project_id TEXT, pinned_at TEXT, archived_at TEXT,
-  budget_override_json TEXT, deleted_at TEXT, trash_batch_id TEXT,
+  budget_override_json TEXT, harness_variant_id TEXT, deleted_at TEXT, trash_batch_id TEXT,
   mode TEXT NOT NULL DEFAULT 'build', plan_id TEXT,
   mcp_server_ids_json TEXT NOT NULL DEFAULT '[]'
 );
@@ -1916,6 +1916,7 @@ export class HearthStore {
     ensureColumn(this.db, "conversations", "deleted_at", "TEXT");
     ensureColumn(this.db, "conversations", "trash_batch_id", "TEXT");
     ensureColumn(this.db, "tasks", "budget_override_json", "TEXT");
+    ensureColumn(this.db, "tasks", "harness_variant_id", "TEXT");
     ensureColumn(this.db, "tasks", "execution_mode", "TEXT");
     ensureColumn(this.db, "tasks", "deleted_at", "TEXT");
     ensureColumn(this.db, "tasks", "trash_batch_id", "TEXT");
@@ -4503,6 +4504,9 @@ export class HearthStore {
       case "schedule.updated":
       case "schedule.run.created":
       case "schedule.run.updated":
+      case "run.harness.applied":
+      case "budget.degraded":
+      case "policy.decision":
       case "job.registered":
       case "job.settled":
       case "task.progress":
@@ -4541,8 +4545,8 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, waiting_kind, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, project_id, pinned_at, archived_at, goal_id, budget_override_json, deleted_at, trash_batch_id, execution_mode, mode, plan_id, mcp_server_ids_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, waiting_kind, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, project_id, pinned_at, archived_at, goal_id, budget_override_json, harness_variant_id, deleted_at, trash_batch_id, execution_mode, mode, plan_id, mcp_server_ids_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        external_ref=excluded.external_ref, request_hash=excluded.request_hash,
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
@@ -4556,7 +4560,7 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
        pending_input=excluded.pending_input, method_id=excluded.method_id, method_version=excluded.method_version,
        project_id=excluded.project_id,
         pinned_at=excluded.pinned_at, archived_at=excluded.archived_at, goal_id=excluded.goal_id,
-        budget_override_json=excluded.budget_override_json, deleted_at=excluded.deleted_at,
+        budget_override_json=excluded.budget_override_json, harness_variant_id=excluded.harness_variant_id, deleted_at=excluded.deleted_at,
         trash_batch_id=excluded.trash_batch_id, execution_mode=excluded.execution_mode,
         mode=excluded.mode, plan_id=excluded.plan_id, mcp_server_ids_json=excluded.mcp_server_ids_json`
   ).run(
@@ -4572,6 +4576,7 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
     task.methodId ?? null, task.methodVersion ?? null, task.projectId ?? null,
     task.pinnedAt ?? null, task.archivedAt ?? null, task.goalId ?? null,
     task.budgetOverride ? JSON.stringify(task.budgetOverride) : null,
+    task.harnessVariantId ?? null,
     task.deletedAt ?? null, task.trashBatchId ?? null, task.executionMode ?? null,
     task.mode ?? "build", task.planId ?? null, JSON.stringify(task.mcpServerIds ?? [])
   );
@@ -4687,6 +4692,7 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
     pendingInput: "pending_input", executorId: "executor_id", taskKind: "task_kind", executionMode: "execution_mode",
     projectId: "project_id", outputDir: "output_dir",
     methodId: "method_id", methodVersion: "method_version",
+    harnessVariantId: "harness_variant_id",
     pinnedAt: "pinned_at", archivedAt: "archived_at", goalId: "goal_id",
     deletedAt: "deleted_at", trashBatchId: "trash_batch_id"
   };
@@ -5725,6 +5731,7 @@ function rowToTask(row: DbRow): TaskRecord {
     pinnedAt: row.pinned_at == null ? null : String(row.pinned_at),
     archivedAt: row.archived_at == null ? null : String(row.archived_at),
     budgetOverride: row.budget_override_json == null ? null : JSON.parse(String(row.budget_override_json)),
+    harnessVariantId: row.harness_variant_id == null ? null : String(row.harness_variant_id),
     ...(row.execution_mode == null ? {} : { executionMode: String(row.execution_mode) as NonNullable<TaskRecord["executionMode"]> }),
     deletedAt: row.deleted_at == null ? null : String(row.deleted_at),
     trashBatchId: row.trash_batch_id == null ? null : String(row.trash_batch_id)

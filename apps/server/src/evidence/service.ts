@@ -4,7 +4,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import type { ArtifactRecord, EventEnvelope, RunRecord, TaskRecord } from "@hearth/core";
+import type { ArtifactRecord, EventEnvelope, PermissionMode, RunRecord, TaskRecord } from "@hearth/core";
 import { ExchangeRecorder, toolCatalogDigest, type CassetteMetadata } from "@hearth/agent-runtime";
 import type { HearthService } from "../service.ts";
 import type { ModelSettings } from "../model-settings.ts";
@@ -31,8 +31,8 @@ import {
   type DegradationDirective
 } from "./cost.ts";
 import type { PricingRegistry } from "./pricing.ts";
-import { buildPolicyFromTask, evaluatePolicy, policyHash, type PolicySpec } from "./policy.ts";
-import { BASELINE_VARIANT, effectiveConfig, type HarnessVariantSpec } from "./variant.ts";
+import { buildPolicyFromTask, evaluatePolicy, policyHash, type PolicyAction, type PolicyEnforcement, type PolicySpec } from "./policy.ts";
+import { BASELINE_VARIANT, BUILTIN_VARIANTS, effectiveConfig, variantById, type HarnessVariantSpec, type VariantBaseline } from "./variant.ts";
 
 export interface EvidenceServiceOptions {
   store: EvidenceStore;
@@ -161,6 +161,26 @@ function inferProducingCall(items: Array<{ kind: string; content: string; proven
   return { toolCallId: null, toolName: null, turn: null, stepId: null, inference: "unknown" };
 }
 
+const VARIANT_BASELINE: VariantBaseline = {
+  contextPolicyVersion: "default",
+  compactionThreshold: 0.68,
+  maxParallelTools: 4,
+  toolPolicy: "full",
+  directTools: [],
+  approvalMode: "necessary",
+  retryMaxRetries: 2,
+  promptRegistryVersion: "native-v1",
+  maxTurns: 40,
+  maxToolCalls: 200,
+  degradationPolicy: "budget-v1"
+};
+
+function variantFromStored(record: Record<string, unknown>): HarnessVariantSpec | null {
+  if (typeof record.id !== "string" || !record.id) return null;
+  if (!record.overrides || typeof record.overrides !== "object") return null;
+  return record as unknown as HarnessVariantSpec;
+}
+
 export class EvidenceService {
   private readonly store: EvidenceStore;
   private readonly service: HearthService;
@@ -202,6 +222,39 @@ export class EvidenceService {
 
   get pricingRegistry(): PricingRegistry {
     return this.pricing;
+  }
+
+  /** The task's own variant wins over the process-level default. */
+  variantForTask(task: TaskRecord | null | undefined): HarnessVariantSpec {
+    const requested = task?.harnessVariantId?.trim();
+    if (!requested) return this.variant;
+    const extra = this.store.listVariants()
+      .map(variantFromStored)
+      .filter((variant): variant is HarnessVariantSpec => variant !== null);
+    try {
+      return variantById(requested, extra);
+    } catch {
+      // A task created before a custom variant was removed must stay readable
+      // (and auditable) rather than crash the whole scheduler.
+      return this.variant;
+    }
+  }
+
+  variantCatalogue(): HarnessVariantSpec[] {
+    const stored = this.store.listVariants()
+      .map(variantFromStored)
+      .filter((variant): variant is HarnessVariantSpec => variant !== null);
+    const seen = new Set<string>();
+    return [...BUILTIN_VARIANTS, this.variant, ...stored]
+      .filter((variant) => {
+        if (seen.has(variant.id)) return false;
+        seen.add(variant.id);
+        return true;
+      });
+  }
+
+  effectiveConfigForTask(task: TaskRecord | null | undefined) {
+    return effectiveConfig(VARIANT_BASELINE, this.variantForTask(task));
   }
 
   private onEvent(event: EventEnvelope): void {
@@ -255,19 +308,8 @@ export class EvidenceService {
     const { settings, policy, lockfileDigest } = this.baseFacts(run, task);
     const budget = budgetsForTask(task, this.budgetConfig)[0] ?? null;
     const permissions = task.permissions ?? { readRoots: [], writeRoots: [], networkHosts: [], tools: [] };
-    const effective = effectiveConfig({
-      contextPolicyVersion: "default",
-      compactionThreshold: 0.68,
-      maxParallelTools: 4,
-      toolPolicy: "full",
-      directTools: [],
-      approvalMode: permissions.approvalMode ?? "necessary",
-      retryMaxRetries: 2,
-      promptRegistryVersion: "native-v1",
-      maxTurns: 40,
-      maxToolCalls: 200,
-      degradationPolicy: "budget-v1"
-    }, this.variant);
+    const variant = this.variantForTask(task);
+    const effective = effectiveConfig(VARIANT_BASELINE, variant);
     return buildRuntimeManifest({
       runId: run.id,
       taskId: task.id,
@@ -312,7 +354,7 @@ export class EvidenceService {
         limits: { usd: budget.limitUsd },
         degradationPolicy: "budget-v1"
       } : null,
-      variant: { harnessVariantId: this.variant.id, effectiveConfigDigest: effective.digest },
+      variant: { harnessVariantId: variant.id, effectiveConfigDigest: effective.digest },
       deps: { lockfileDigest },
       executorId: run.executorId ?? task.executorId ?? null
     });
@@ -699,12 +741,81 @@ export class EvidenceService {
   }
 
   /** Escalate the quality-aware degradation ladder and return the active directive. */
-  escalateBudget(runId: string, reason: string, detail: Record<string, unknown> = {}): DegradationDirective {
-    return this.degradation.escalate(runId, reason, detail);
+  escalateBudget(runId: string, reason: string, detail: Record<string, unknown> = {}, scopeKey?: string): DegradationDirective {
+    return this.degradation.escalate(runId, reason, detail, scopeKey);
   }
 
-  budgetDirective(runId: string): DegradationDirective {
-    return this.degradation.directive(runId);
+  budgetDirective(runId: string, scopeKey?: string): DegradationDirective {
+    return this.degradation.directive(runId, scopeKey);
+  }
+
+  /**
+   * Authoritative production authorization.
+   *
+   * The action policy still resolves and classifies the concrete action; this
+   * engine is the decision point that can allow, ask or deny before any
+   * approval is created. Full-permission mode downgrades `ask` to an implicit
+   * allow, but explicit deny rules always win.
+   */
+  decidePolicy(input: {
+    task: TaskRecord;
+    runId: string | null;
+    action: PolicyAction;
+    permissionMode: PermissionMode;
+    context?: "interactive" | "scheduled";
+  }): PolicyEnforcement {
+    const spec = buildPolicyFromTask(input.task);
+    const evaluation = evaluatePolicy(spec, input.action);
+    let allow = true;
+    let requireApproval = false;
+    let enforcedBy: PolicyEnforcement["enforcedBy"] = "rule";
+    let reason = evaluation.reason;
+
+    if (spec.mode === "shadow") {
+      enforcedBy = "shadow";
+      reason = `shadow:${evaluation.reason}`;
+    } else if (spec.mode === "disabled") {
+      enforcedBy = "disabled";
+      reason = "policy_disabled";
+    } else if (evaluation.effectiveDecision === "deny") {
+      allow = false;
+      enforcedBy = "rule_deny";
+    } else if (evaluation.effectiveDecision === "ask") {
+      if (input.permissionMode === "full" || spec.approval.mode === "full") {
+        enforcedBy = "full_permission_allow";
+        reason = `full_mode_allow:${evaluation.reason}`;
+      } else {
+        requireApproval = true;
+        enforcedBy = "rule_ask";
+      }
+    }
+
+    const now = this.now().toISOString();
+    this.store.recordPolicyDecision({
+      id: `policy:${input.runId ?? input.task.id}:${digestOf({
+        tool: input.action.tool,
+        args: input.action.args ?? null,
+        paths: input.action.paths ?? [],
+        domains: input.action.domains ?? [],
+        effect: input.action.effect ?? null,
+        at: now
+      }).slice("sha256:".length, 24)}`,
+      runId: input.runId,
+      taskId: input.task.id,
+      ruleId: evaluation.ruleId,
+      policyVersion: evaluation.policyVersion,
+      decision: input.permissionMode === "full" && evaluation.effectiveDecision === "ask" ? "allow" : evaluation.effectiveDecision,
+      createdAt: now,
+      payload: {
+        phase: "pre",
+        source: "policy_engine",
+        context: input.context ?? "interactive",
+        action: input.action,
+        evaluation,
+        enforcement: { allow, requireApproval, enforcedBy, reason }
+      }
+    });
+    return { evaluation, allow, requireApproval, enforcedBy, reason };
   }
 
   /** Predicted approvals (preflight) versus decisions actually recorded for a task. */
@@ -743,6 +854,7 @@ export class EvidenceService {
       manifests: this.store.listAllManifests(200).length,
       pricing: this.pricing.active().id,
       variant: this.variant.id,
+      variants: this.variantCatalogue().map((variant) => variant.id),
       budgetConfig: this.budgetConfig
     };
   }

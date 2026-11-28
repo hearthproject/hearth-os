@@ -40,6 +40,8 @@ export interface EffectiveHarnessConfig {
   maxToolCalls: number;
   degradationPolicy: string;
   digest: string;
+  /** Raw overlay actually declared by the variant; used to decide which knobs to touch. */
+  overrides: HarnessVariantSpec["overrides"];
 }
 
 export interface VariantBaseline {
@@ -139,7 +141,7 @@ export function effectiveConfig(base: VariantBaseline, variant: HarnessVariantSp
     maxToolCalls: overrides.maxToolCalls ?? base.maxToolCalls,
     degradationPolicy: overrides.degradationPolicy ?? base.degradationPolicy
   };
-  return { ...merged, digest: digestOf(merged) };
+  return { ...merged, overrides: variant.overrides, digest: digestOf(merged) };
 }
 
 /** Runtime-side metrics aggregated from manifests, used by the Lab report. */

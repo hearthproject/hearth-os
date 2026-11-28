@@ -72,6 +72,8 @@ import { DOSSIER_DIR, HEARTH_ROOT, WORKSTYLE_PATH } from "./config.ts";
 import { DossierStore, dossierPromptBlock } from "./dossier.ts";
 import { WorkstyleStore, workstylePromptBlock } from "./workstyle.ts";
 import type { ModelSettings } from "./model-settings.ts";
+import type { EffectiveHarnessConfig } from "./evidence/variant.ts";
+import type { DegradationDirective } from "./evidence/cost.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 import { browserToolSecrets, redactBrowserToolArguments, redactKnownSecrets } from "./browser-redaction.ts";
 
@@ -165,6 +167,10 @@ export interface NativeRunOptions {
   toolCircuitBreaker?: {
     maxConsecutiveFailures?: number;
   };
+  /** Task-level harness variant applied to this run. */
+  harness?: EffectiveHarnessConfig;
+  /** Budget-driven degradation directive applied to this run. */
+  degradation?: DegradationDirective;
   /**
    * Runtime cassette plane. `record` wraps the real model/tools and captures
    * every exchange; `strict_replay` accepts only recorded exchanges; and
@@ -207,8 +213,9 @@ export interface NativeRunResult {
 
 //runNativeTask() 把模型、工具、提示词和回调装配起来
 export async function runNativeTask(options: NativeRunOptions): Promise<NativeRunResult> {
-  if (!supportsToolCalling(options.settings.protocol)) {
-    throw new Error(`当前模型协议不支持工具调用：${options.settings.protocol}`);
+  const runtimeSettings = runtimeSettingsFor(options);
+  if (!supportsToolCalling(runtimeSettings.protocol)) {
+    throw new Error(`当前模型协议不支持工具调用：${runtimeSettings.protocol}`);
   }
   const screenshotTask = wantsScreenshot(`${options.task.title}\n${options.task.goal}`);
   const githubTask = wantsGithubAccess(`${options.task.title}\n${options.task.goal}`);
@@ -360,18 +367,18 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   //具体实现
   const backgroundTasks = getBackgroundTaskRegistry();
   const baseModel: AgentModel = drafting
-    ? draftModelAdapter(options.settings, resolve(options.prepared.outDir, options.expectedOutputs[0] ?? "result.md"))
-    : modelAdapter(options.settings, options.onModelRequest);
+    ? draftModelAdapter(runtimeSettings, resolve(options.prepared.outDir, options.expectedOutputs[0] ?? "result.md"))
+    : modelAdapter(runtimeSettings, options.onModelRequest);
   const model: AgentModel = options.cassette
     ? cassetteModel(baseModel, {
         mode: options.cassette.mode,
         runId: options.runId ?? options.taskId ?? options.task.id,
-        modelId: options.settings.model,
-        protocol: options.settings.protocol,
+        modelId: runtimeSettings.model,
+        protocol: runtimeSettings.protocol,
         sampling: {
           temperature: 0.2,
-          maxTokens: options.settings.maxOutputTokens,
-          reasoningEffort: options.settings.reasoningEffort ?? "max"
+          maxTokens: runtimeSettings.maxOutputTokens,
+          reasoningEffort: runtimeSettings.reasoningEffort ?? "max"
         },
         ...(options.cassette.recorder ? { recorder: options.cassette.recorder } : {}),
         ...(options.cassette.source ? { source: options.cassette.source } : {}),
@@ -405,10 +412,10 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     profile,
     mode: options.mode ?? "build",
     toolTimeoutMs: taskProfile.toolTimeoutMs,
-    maxParallelTools: options.maxParallelTools ?? taskProfile.maxParallelTools,
+    maxParallelTools: options.harness?.overrides.maxParallelTools ?? options.maxParallelTools ?? taskProfile.maxParallelTools,
     keepRecentToolOutputs: taskProfile.keepRecentToolOutputs,
-    directTools,
-    deferRemaining: taskProfile.deferRemaining,
+    directTools: harnessDirectTools(options, directTools),
+    deferRemaining: options.harness?.overrides.toolPolicy === "deferred" ? true : taskProfile.deferRemaining,
     maxGoalRounds: options.maxGoalRounds ?? taskProfile.maxGoalRounds,
     ...(options.toolRetryPolicy ? { toolRetryPolicy: options.toolRetryPolicy } : {}),
     ...(options.toolCircuitBreaker ? { toolCircuitBreaker: options.toolCircuitBreaker } : {}),
@@ -426,19 +433,19 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
         : {}),
     ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
     ...(options.maxGoalRounds !== undefined ? { maxGoalRounds: options.maxGoalRounds } : {}),
-    ...(options.retryPolicy ? { retryPolicy: options.retryPolicy } : { retryPolicy: nativeRetryPolicy(options.settings) }),
+    ...(options.retryPolicy ? { retryPolicy: options.retryPolicy } : { retryPolicy: retryPolicyFor(options) }),
     ...(options.stallPolicy ? { stallPolicy: options.stallPolicy } : { stallPolicy: { warnMs: 10 * 60_000, abortMs: 30 * 60_000 } }),
     ...(options.checkpointPolicy ? { checkpointPolicy: options.checkpointPolicy } : {}),
     ...(resume ? { resume } : {}),
     ...(options.steering ? { steering: options.steering } : {}),
-    contextWindowTokens: options.settings.contextWindowTokens,
-    compactTriggerTokens: 80_000,
+    contextWindowTokens: runtimeSettings.contextWindowTokens,
+    compactTriggerTokens: contextKnobsFor(options, runtimeSettings).compactTriggerTokens,
     // runtime's effective trigger is window - max(reserve, output) - 16K;
-    // this extra 16K subtraction puts the trigger exactly at the shared 80%.
-    contextReserveTokens: Math.max(4_000, options.settings.contextWindowTokens - resolveContextWindowPolicy(options.settings).compactThresholdTokens - 16_000),
-    maxOutputTokens: options.settings.maxOutputTokens,
+    // the reserve keeps the configured ratio as the real compaction point.
+    contextReserveTokens: contextKnobsFor(options, runtimeSettings).contextReserveTokens,
+    maxOutputTokens: runtimeSettings.maxOutputTokens,
     ...(workspaceHooks.hooks.length > 0 ? { hooks: workspaceHooks.hooks, hookTimeoutMs: 10_000 } : {}),
-    modelId: options.settings.model,
+    modelId: runtimeSettings.model,
     requireFinishTool: true,
     // 真实交付任务必须先建计划；草稿、子代理、计划模式与恢复执行跳过。
     requirePlanFirst: !drafting && !directRead && !options.isSubagent && (options.mode ?? "build") === "build" && !resume,
@@ -447,7 +454,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     stopOnToolError: drafting,
     verifyGoalCompletion: async (goal) => {
       try {
-        const response = await completeChat(options.settings, [
+        const response = await completeChat(runtimeSettings, [
           {
             role: "system",
             content: [
@@ -478,7 +485,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       }
       return coding ? codingFinishIssue(context, result) : null;
     },
-    summarizeContext: options.onContextSummary ?? ((messages, signal) => summarizeNativeContext(options.settings, messages, signal)),
+    summarizeContext: options.onContextSummary ?? ((messages, signal) => summarizeNativeContext(runtimeSettings, messages, signal)),
     onEvent: (event) => {
       if (event.type === "context.usage") {
         options.onContextEvent?.({
@@ -1698,6 +1705,49 @@ function appendSandboxAudit(prepared: PreparedWorkspace, taskId: string, payload
   } catch {
     // Audit must not block execution; the same decision is surfaced as progress.
   }
+}
+
+function runtimeSettingsFor(options: NativeRunOptions): ModelSettings {
+  const fallback = options.degradation?.fallbackModel
+    ? (process.env.HEARTH_FALLBACK_MODEL ?? "").trim()
+    : "";
+  if (!fallback || fallback === options.settings.model) return options.settings;
+  return {
+    ...options.settings,
+    model: fallback,
+    maxOutputTokens: Math.min(options.settings.maxOutputTokens, 4_096),
+    reasoningEffort: "low"
+  };
+}
+
+function contextKnobsFor(options: NativeRunOptions, settings: ModelSettings): { compactTriggerTokens: number; contextReserveTokens: number } {
+    const window = settings.contextWindowTokens;
+    const ratio = options.harness?.overrides.compactionThreshold;
+    const baseTrigger = ratio !== undefined ? Math.floor(window * ratio) : 80_000;
+    const scale = options.degradation?.contextScale ?? 1;
+    const compactTriggerTokens = Math.max(8_000, Math.floor(baseTrigger * scale));
+    const contextReserveTokens = Math.max(4_000, window - compactTriggerTokens - 16_000);
+    return { compactTriggerTokens, contextReserveTokens };
+}
+
+function retryPolicyFor(options: NativeRunOptions): RetryPolicy {
+  const base = nativeRetryPolicy(options.settings);
+  const degradationRetries = options.degradation?.maxRetries;
+  const variantRetries = options.harness?.overrides.retryMaxRetries;
+  const maxRetries = degradationRetries !== null && degradationRetries !== undefined
+    ? Math.min(base.maxRetries, degradationRetries)
+    : variantRetries !== undefined
+      ? Math.min(base.maxRetries, variantRetries)
+      : base.maxRetries;
+  return { ...base, maxRetries };
+}
+
+function harnessDirectTools(options: NativeRunOptions, current: string[]): string[] {
+  const overrides = options.harness?.overrides;
+  if (!overrides || overrides.toolPolicy !== "deferred" || !overrides.directTools?.length) return current;
+  if ((options.mode ?? "build") === "plan") return current;
+  const delegation = current.filter((name) => name === "agent" || name === "delegate_task");
+  return [...new Set([...overrides.directTools, ...delegation])];
 }
 
 function nativeRetryPolicy(settings: ModelSettings): RetryPolicy {

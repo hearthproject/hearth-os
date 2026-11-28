@@ -95,6 +95,15 @@ export function registerEvidenceRoutes(app: FastifyInstance, options: EvidenceRo
     return reply.send(evidence.artifactGraph(taskId));
   });
 
+  app.get("/api/evidence/tasks/:taskId/provenance", async (request, reply) => {
+    const { taskId } = request.params as { taskId: string };
+    const task = service.store.getTask(taskId);
+    if (!task) return reply.code(404).send({ error: "TASK_NOT_FOUND" });
+    const graph = evidence.artifactGraph(taskId);
+    const chains = store.listProvenanceForTask(taskId);
+    return reply.send({ taskId, graph, chains });
+  });
+
   app.get("/api/evidence/artifacts/:artifactId/provenance", async (request, reply) => {
     const { artifactId } = request.params as { artifactId: string };
     const provenance = store.getProvenance(artifactId);

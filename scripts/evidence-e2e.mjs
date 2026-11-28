@@ -185,7 +185,8 @@ function startMockProvider() {
 }
 
 function spawnServer(name, cwd, args, env) {
-  const child = spawn(process.platform === "win32" ? "npx.cmd" : "npx", args, {
+  const command = process.platform === "win32" ? "npx.cmd" : "npx";
+  const child = spawn(command, args, {
     cwd,
     env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
@@ -221,12 +222,23 @@ async function jsonFetch(url, init) {
   return payload;
 }
 
-async function waitForTask(taskId, timeoutMs = 180_000) {
+async function waitForTask(taskId, timeoutMs = 240_000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
+  let planApproved = false;
   while (Date.now() < deadline) {
     last = await jsonFetch(`${OS_URL}/api/tasks/${taskId}`);
     const status = last.task?.status ?? last.status;
+    const waitingKind = last.task?.waitingKind ?? last.waitingKind;
+    if (status === "waiting_input" && waitingKind === "plan_approval" && !planApproved) {
+      planApproved = true;
+      await jsonFetch(`${OS_URL}/api/tasks/${taskId}/confirm-waiting`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ note: "计划已确认，请按计划执行。" })
+      });
+      continue;
+    }
     if (["completed", "failed", "cancelled", "waiting_approval", "waiting_budget"].includes(status)) return last;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
   }
@@ -303,19 +315,23 @@ try {
   });
   await waitFor(`${EVAL_URL}/api/evidence/health`, 90_000);
 
-  const created = await jsonFetch(`${OS_URL}/api/tasks`, {
+  const created = await jsonFetch(`${OS_URL}/api/eval/tasks`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
+      externalRef: `e2e-${Date.now()}`,
       title: "E2E 证据链路",
       goal: "在工作区编写 report.md，写明关键结论，然后调用 finish_task 完成。",
+      inputs: [],
+      expectedOutputs: ["report.md"],
       executorId: "native",
       taskKind: "workspace",
-      expectedOutputs: ["report.md"]
+      harnessVariantId: "context-compact",
+      runMode: "offline"
     })
   });
-  const taskId = created.id ?? created.task?.id;
-  check("task created", typeof taskId === "string" && taskId.length > 0, created);
+  const taskId = created.task?.id ?? created.id;
+  check("eval task created through /api/eval/tasks", created.created === true && typeof taskId === "string" && taskId.length > 0, created);
 
   const finished = await waitForTask(taskId);
   const task = finished.task ?? finished;
@@ -324,10 +340,30 @@ try {
   const runId = task.currentRunId ?? task.latestRunId ?? task.runId ?? finished.runId ?? finished.latestRun?.id;
   check("run id present", typeof runId === "string", { runId, keys: Object.keys(task) });
 
+  const firstTrace = await jsonFetch(`${OS_URL}/api/eval/tasks/${taskId}/trace?limit=25`);
+  check("eval trace pages by seq", Array.isArray(firstTrace.events) && firstTrace.events.length > 0
+    && typeof firstTrace.hasMore === "boolean" && typeof firstTrace.nextSeq === "number", firstTrace);
+  let traceSeq = firstTrace.nextSeq;
+  let traceHasMore = firstTrace.hasMore;
+  let harnessApplied = firstTrace.events.some((event) => event.type === "run.harness.applied");
+  while (traceHasMore) {
+    const next = await jsonFetch(`${OS_URL}/api/eval/tasks/${taskId}/trace?afterSeq=${traceSeq}&limit=100`);
+    harnessApplied = harnessApplied || next.events.some((event) => event.type === "run.harness.applied");
+    traceSeq = next.nextSeq;
+    traceHasMore = next.hasMore;
+    if (next.events.length === 0) break;
+  }
+  check("task-level harness variant applied in runtime", harnessApplied, { taskId });
+
+  const evalArtifacts = await jsonFetch(`${OS_URL}/api/eval/tasks/${taskId}/artifacts`);
+  const reportArtifact = evalArtifacts.artifacts?.find((artifact) => String(artifact.relativePath).endsWith("report.md"));
+  check("eval artifact endpoint serves content", Boolean(reportArtifact) && String(reportArtifact.content ?? "").includes("关键结论"), evalArtifacts.artifacts);
+
   // OS contract surface
   const manifest = await jsonFetch(`${OS_URL}/api/evidence/runs/${runId}/manifest`);
   check("OS manifest present", manifest.manifest?.runId === runId, manifest.manifest?.runId);
   check("OS manifest fingerprint valid", manifest.fingerprintValid === true, manifest.manifest?.compatibilityFingerprint);
+  check("task-level variant recorded in manifest", manifest.manifest?.variant?.harnessVariantId === "context-compact", manifest.manifest?.variant);
   check("OS completeness is honest", manifest.manifest?.completeness?.status === "complete"
     || (manifest.manifest?.completeness?.status === "incomplete_provenance" && manifest.manifest?.completeness?.missing?.length > 0),
     manifest.manifest?.completeness);

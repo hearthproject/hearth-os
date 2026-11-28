@@ -28,6 +28,8 @@ import { executorHome } from "./executor-runtime.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { AgentModeResolution } from "./agent-mode.ts";
 import { nativePermissionsFor, withExtraToolPermissions, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
+import type { EffectiveHarnessConfig } from "./evidence/variant.ts";
+import type { DegradationDirective } from "./evidence/cost.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 import { wantsScreenshot } from "./task-intent.ts";
 
@@ -61,6 +63,10 @@ export interface ExecutorAttemptContext {
   run: RunRecord;
   prepared: PreparedWorkspace;
   budget: RunBudget;
+  /** Task-level harness variant and overrides selected for this run. */
+  harness?: EffectiveHarnessConfig | undefined;
+  /** Active budget degradation directive; absent/`none` means normal operation. */
+  degradation?: DegradationDirective | undefined;
   signal: AbortSignal;
   fullPermission: boolean;
   operationLedger?: OperationLedger;
@@ -206,6 +212,8 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       ...(resumable ? { resume: resumable } : {}),
       ...(input.extraNativeTools?.length ? { extraTools: input.extraNativeTools } : {}),
       ...(input.skipBuiltinGoalTools ? { skipBuiltinGoalTools: true } : {}),
+      ...(input.harness ? { harness: input.harness } : {}),
+      ...(input.degradation && input.degradation.step !== "none" ? { degradation: input.degradation } : {}),
       ...(input.finishGuards?.length ? { finishGuards: input.finishGuards } : {}),
       ...(input.steering ? { steering: input.steering } : {}),
       expectedOutputs: input.expectedOutputs,

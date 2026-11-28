@@ -58,6 +58,9 @@ import { createMcpTools, parseMcpToolName } from "./mcp-tools.ts";
 import type { McpServerService } from "./mcp-servers.ts";
 import { DEFAULT_RUN_BUDGET, nativePermissionsFor, runNativeTask } from "./native-executor.ts";
 import type { EvidenceService } from "./evidence/service.ts";
+import type { EffectLevel, PolicyAction } from "./evidence/policy.ts";
+import type { DegradationDirective } from "./evidence/cost.ts";
+import type { EffectiveHarnessConfig } from "./evidence/variant.ts";
 import { ContextBroker } from "./context-broker.ts";
 import type { LibraryService } from "./library/service.ts";
 import { createLibraryTools } from "./library/tools.ts";
@@ -1418,7 +1421,9 @@ export class HearthScheduler {
       this.activeByExecutor.set(executorId, active);
       if (task.conversationId) activeConversations.add(task.conversationId);
       const promise = this.runTask(task)
-        .catch(() => undefined)
+        .catch((error) => {
+          console.error(`[scheduler] runTask failed task=${task.id}:`, error instanceof Error ? error.stack ?? error.message : String(error));
+        })
         .finally(() => {
           active.delete(task.id);
           this.runPromises.delete(promise);
@@ -2208,14 +2213,46 @@ export class HearthScheduler {
           parentRunId: previousRun?.id ?? null, handoffId: handoff?.id ?? null
         };
         this.service.createRun(run);
+        const harness = this.evidence?.effectiveConfigForTask(task);
+        const variantSpec = this.evidence?.variantForTask(task);
         let attemptBudget = remainingBudget;
+        if (variantSpec) {
+          const caps: RunBudget = {
+            ...(variantSpec.overrides.maxTurns !== undefined ? { maxTurns: variantSpec.overrides.maxTurns } : {}),
+            ...(variantSpec.overrides.maxToolCalls !== undefined ? { maxToolCalls: variantSpec.overrides.maxToolCalls } : {})
+          };
+          if (Object.keys(caps).length > 0) attemptBudget = { ...attemptBudget, ...caps };
+          if (harness) {
+            const event = this.service.store.appendEvent({
+              type: "run.harness.applied",
+              taskId,
+              runId,
+              payload: {
+                variantId: harness.variantId,
+                effectiveConfigDigest: harness.digest,
+                overrides: harness.overrides,
+                caps,
+                at: new Date().toISOString()
+              }
+            });
+            this.service.bus.publish(event);
+          }
+        }
+        const degradationScope = `task:${taskId}`;
         if (degradeStatus && this.evidence) {
-          const directive = this.evidence.escalateBudget(runId, degradeStatus.reason, { status: degradeStatus });
+          const directive = this.evidence.escalateBudget(runId, degradeStatus.reason, { status: degradeStatus }, degradationScope);
           const event = this.service.store.appendEvent({
             type: "budget.degraded",
             taskId,
             runId,
-            payload: { ...directive, trigger: degradeStatus.reason, status: degradeStatus, at: new Date().toISOString() }
+            payload: {
+              ...directive,
+              trigger: degradeStatus.reason,
+              status: degradeStatus,
+              carriedOver: false,
+              applied: { contextScale: directive.contextScale, maxRetries: directive.maxRetries, maxToolCallsPerRun: directive.maxToolCallsPerRun, fallbackModel: directive.fallbackModel, stop: directive.stop },
+              at: new Date().toISOString()
+            }
           });
           this.service.bus.publish(event);
           if (directive.stop) {
@@ -2237,12 +2274,25 @@ export class HearthScheduler {
             this.refreshTaskSummary(taskId);
             return;
           }
-          attemptBudget = {
-            ...remainingBudget,
-            ...(remainingBudget.maxToolCalls !== undefined
-              ? { maxToolCalls: Math.max(1, Math.floor(remainingBudget.maxToolCalls * directive.contextScale)) }
-              : {})
-          };
+        }
+        const activeDirective = this.evidence?.budgetDirective(runId, degradationScope) ?? null;
+        if (activeDirective && activeDirective.step !== "none") {
+          if (!degradeStatus) {
+            const event = this.service.store.appendEvent({
+              type: "budget.degraded",
+              taskId,
+              runId,
+              payload: {
+                ...activeDirective,
+                trigger: "carried_over",
+                carriedOver: true,
+                applied: { contextScale: activeDirective.contextScale, maxRetries: activeDirective.maxRetries, maxToolCallsPerRun: activeDirective.maxToolCallsPerRun, fallbackModel: activeDirective.fallbackModel, stop: activeDirective.stop },
+                at: new Date().toISOString()
+              }
+            });
+            this.service.bus.publish(event);
+          }
+          attemptBudget = applyDegradationBudget(attemptBudget, activeDirective);
           run.budget = attemptBudget;
         }
         if (appliedFollowUp) {
@@ -2989,6 +3039,8 @@ export class HearthScheduler {
         run,
         prepared,
         budget,
+        harness: this.evidence?.effectiveConfigForTask(task) ?? undefined,
+        degradation: this.evidence?.budgetDirective(runId, `task:${taskId}`) ?? undefined,
         signal: controller.signal,
         fullPermission,
         operationLedger: this.operationLedger,
@@ -3349,7 +3401,7 @@ export class HearthScheduler {
     const visibleArgumentsValue = redactBrowserToolArguments(toolName, argumentsValue);
     const summary = toolApprovalSummary(toolName, input.request.call.arguments);
     const permissionMode = this.service.permissionModeForTask(input.task);
-    if (permissionMode === "full") return { allowed: true };
+    const policyMode = policyPermissionMode(permissionMode);
     const context = this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" as const : "interactive" as const;
     const browserPage = this.browserSessions.activeTab(input.task.id);
     const browserSnapshot = this.browserSessions.latestSnapshot(input.task.id);
@@ -3378,13 +3430,38 @@ export class HearthScheduler {
       return { allowed: false, reason: `工具 ${toolName} 无法绑定到真实动作：${errorMessage(error)}` };
     }
     if (!action) {
-      return classification.requiresApproval
+      const policyAction = policyActionForTool(toolName, classification, visibleArgumentsValue);
+      const enforcement = this.evidence?.decidePolicy({
+        task: input.task,
+        runId: input.run.id,
+        action: policyAction,
+        permissionMode: policyMode,
+        context
+      });
+      if (enforcement && !enforcement.allow) {
+        return { allowed: false, reason: `策略拒绝（${enforcement.evaluation.ruleId ?? "默认规则"}）：${enforcement.reason}` };
+      }
+      const requiresApproval = enforcement ? enforcement.requireApproval : classification.requiresApproval;
+      return requiresApproval
         ? { allowed: false, reason: `工具 ${toolName} 无法确认外部影响，已拒绝执行` }
         : { allowed: true };
     }
-    const policy = decideActionPolicy(action, { permissionMode, context, preauthorized: false });
-    if (!policy.allowed) return { allowed: false, reason: policy.reason };
-    if (!policy.requiresApproval) {
+    const actionPolicy = decideActionPolicy(action, { permissionMode, context, preauthorized: false });
+    if (!actionPolicy.allowed) return { allowed: false, reason: actionPolicy.reason };
+    // Policy as code is the authoritative decision point. Action Policy keeps
+    // resolving and classifying the concrete action; this engine decides.
+    const enforcement = this.evidence?.decidePolicy({
+      task: input.task,
+      runId: input.run.id,
+      action: policyActionFromResolved(action, toolName),
+      permissionMode: policyMode,
+      context
+    });
+    if (enforcement && !enforcement.allow) {
+      return { allowed: false, reason: `策略拒绝（${enforcement.evaluation.ruleId ?? "默认规则"}）：${enforcement.reason}` };
+    }
+    const requiresApproval = enforcement ? enforcement.requireApproval : actionPolicy.requiresApproval;
+    if (!requiresApproval) {
       return { allowed: true };
     }
     const decision = await this.requestToolApproval({
@@ -3428,10 +3505,27 @@ export class HearthScheduler {
   }): Promise<DshApprovalOutcome> {
     if (input.signal.aborted) return "cancelled";
     const permissionMode = this.service.approvalModeForTask(input.task);
-    if (permissionMode === "full") return "allowed-once";
+    const policyMode = policyPermissionMode(permissionMode);
     const metadata = dshApprovalMetadata(input.request);
     const classification = classifyTool(input.request.toolName);
-    if (!classification.requiresApproval) {
+    const enforcement = this.evidence?.decidePolicy({
+      task: input.task,
+      runId: input.run.id,
+      action: policyActionForTool(input.request.toolName, classification, metadata),
+      permissionMode: policyMode,
+      context: "interactive"
+    });
+    if (enforcement && !enforcement.allow) {
+      this.publishProgress(
+        input.task.id,
+        input.run.id,
+        "notice",
+        `策略拒绝 ${input.request.toolName}：${enforcement.reason}`
+      );
+      return "rejected";
+    }
+    const requiresApproval = enforcement ? enforcement.requireApproval : classification.requiresApproval;
+    if (!requiresApproval) {
       return "allowed-once";
     }
     const decision = await this.requestToolApproval({
@@ -4456,13 +4550,86 @@ function digestWorkspace(root: string, limit = 5_000): string {
   return hash.digest("hex");
 }
 
-function dshApprovalMetadata(request: DshApprovalRequest): Record<string, unknown> {
+function policyPermissionMode(mode: ApprovalMode | "read-only" | "guarded" | "workspace" | "full"): "read-only" | "guarded" | "workspace" | "full" {
+  return mode === "necessary" ? "guarded" : mode;
+}
+
+function applyDegradationBudget(budget: RunBudget, directive: DegradationDirective): RunBudget {
+  if (directive.maxToolCallsPerRun === null) return budget;
+  const limit = Math.max(0, directive.maxToolCallsPerRun);
   return {
+    ...budget,
+    maxToolCalls: budget.maxToolCalls === undefined ? limit : Math.min(budget.maxToolCalls, limit)
+  };
+}
+
+function dshApprovalMetadata(request: DshApprovalRequest): Record<string, unknown> {  return {
     provider: "deepseek-harness",
     sessionId: request.sessionId,
     toolName: request.toolName,
     ...(request.callId ? { callId: request.callId } : {}),
     ...(request.reason ? { reason: clipText(request.reason, 2_000) } : {})
+  };
+}
+
+function effectForActionClass(actionClass: string): EffectLevel {
+  switch (actionClass) {
+    case "local_read":
+    case "browser_read":
+    case "external_read":
+    case "host_read":
+      return "read";
+    case "local_delete":
+      return "destructive";
+    case "external_write":
+    case "skill_install":
+      return "external";
+    case "local_write":
+    case "local_exec":
+    case "desktop":
+    default:
+      return "write";
+  }
+}
+
+function policyActionForTool(
+  toolName: string,
+  classification: { actionClass: string },
+  args: unknown
+): PolicyAction {
+  return {
+    tool: toolName,
+    args: args ?? null,
+    effect: effectForActionClass(classification.actionClass)
+  };
+}
+
+function policyActionFromResolved(action: ResolvedAction, toolName: string): PolicyAction {
+  const paths = [
+    ...action.files.map((file) => file.pathRealPath),
+    ...(action.hostFile ? [action.hostFile.pathRealPath] : [])
+  ];
+  const domains = [
+    ...(action.network?.host ? [action.network.host] : []),
+    ...(action.browser?.host ? [action.browser.host] : [])
+  ];
+  const effect: EffectLevel = action.kind === "file_delete" || action.kind === "shell"
+    ? (action.kind === "file_delete" || action.sideEffectClass === "local_irreversible" ? "destructive" : "write")
+    : action.kind === "network" || action.kind === "mcp" || action.kind === "email" || action.kind === "calendar"
+      ? ((action.network?.method ?? "").toUpperCase() === "GET" ? "read" : "external")
+      : action.kind === "browser"
+        ? (["read", "assert", "screenshot", "open", "navigate", "download"].includes(action.browser?.action ?? "") ? "read" : "external")
+        : action.kind === "host_file"
+          ? "read"
+          : action.kind === "desktop"
+            ? "write"
+            : "write";
+  return {
+    tool: toolName,
+    args: { actionDigest: action.actionDigest, summary: action.summary, risk: action.risk },
+    ...(paths.length > 0 ? { paths } : {}),
+    ...(domains.length > 0 ? { domains } : {}),
+    effect
   };
 }
 

@@ -1,6 +1,7 @@
 export const pageLoaders = {
   library: () => import("../pages/LibraryPage.tsx"),
   schedules: () => import("../pages/SchedulesPage.tsx"),
+  evidence: () => import("../pages/EvidencePage.tsx"),
   connections: () => import("../pages/ConnectionsPage.tsx"),
   settings: () => import("../pages/SettingsPage.tsx"),
   onboarding: () => import("../pages/OnboardingPage.tsx")
@@ -9,6 +10,7 @@ export const pageLoaders = {
 const PATH_LOADERS: Record<string, () => Promise<unknown>> = {
   "/library": pageLoaders.library,
   "/schedules": pageLoaders.schedules,
+  "/evidence": pageLoaders.evidence,
   "/connections": pageLoaders.connections,
   "/settings": pageLoaders.settings,
   "/welcome": pageLoaders.onboarding

@@ -13,6 +13,7 @@ const LibraryPage = lazy(() => pageLoaders.library().then((module) => ({ default
 const OnboardingPage = lazy(() => pageLoaders.onboarding().then((module) => ({ default: module.OnboardingPage })));
 const SettingsPage = lazy(() => pageLoaders.settings().then((module) => ({ default: module.SettingsPage })));
 const SchedulesPage = lazy(() => pageLoaders.schedules().then((module) => ({ default: module.SchedulesPage })));
+const EvidencePage = lazy(() => pageLoaders.evidence().then((module) => ({ default: module.EvidencePage })));
 
 export default function App() {
   return (
@@ -33,6 +34,7 @@ export default function App() {
             <Route path="context" element={<Navigate to="/library?handoff=1" replace />} />
             <Route path="dossier" element={<Navigate to="/settings?tab=dossier" replace />} />
             <Route path="schedules" element={<Suspended><SchedulesPage /></Suspended>} />
+            <Route path="evidence" element={<Suspended><EvidencePage /></Suspended>} />
             <Route path="connections" element={<Suspended><ConnectionsPage /></Suspended>} />
             <Route path="settings" element={<Suspended><SettingsPage /></Suspended>} />
             <Route path="*" element={<Navigate to="/" replace />} />

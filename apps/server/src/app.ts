@@ -19,6 +19,7 @@ import { PricingRegistry } from "./evidence/pricing.ts";
 import { EvidenceService } from "./evidence/service.ts";
 import { ReplayService } from "./evidence/replay.ts";
 import { registerEvidenceRoutes } from "./evidence/routes.ts";
+import { registerEvalApi } from "./evidence/eval-api.ts";
 import { BASELINE_VARIANT, variantById } from "./evidence/variant.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
@@ -133,6 +134,7 @@ const createTaskSchema = z.object({
   expectedOutputs: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
   projectId: z.string().trim().min(1).max(120).optional(),
   mcpServerIds: z.array(z.string().trim().min(1).max(120)).max(8).optional(),
+  harnessVariantId: z.string().trim().min(1).max(80).optional(),
   permissions: z.object({
     readRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
     writeRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
@@ -1124,6 +1126,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
     store: evidenceStore,
     replay: replayService,
     dataDir: evidenceDataDir
+  });
+  registerEvalApi(app, {
+    service,
+    store: evidenceStore,
+    evidence,
+    modelSettingsForExecutor,
+    repoRoot: REPO_ROOT
   });
   app.addHook("onClose", async () => {
     evidence.dispose();
@@ -2421,6 +2430,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (parsed.data.permissions !== undefined) input.permissions = parsed.data.permissions;
     if (parsed.data.projectId !== undefined) input.projectId = parsed.data.projectId;
     if (parsed.data.mcpServerIds !== undefined) input.mcpServerIds = parsed.data.mcpServerIds;
+    if (parsed.data.harnessVariantId !== undefined) input.harnessVariantId = parsed.data.harnessVariantId;
 
     try {
       const task = service.createTask(input);

@@ -70,6 +70,8 @@ export interface CreateTaskInput {
   projectId?: string;
   workspacePath?: string;
   mcpServerIds?: string[];
+  /** Task-level harness variant; validated by the scheduler/evidence plane at run start. */
+  harnessVariantId?: string | null;
 }
 
 export class TaskInputSelectionError extends Error {
@@ -286,6 +288,7 @@ export class HearthService {
       ...(permissions ? { permissions } : {}),
       methodId: input.methodId ?? null,
       methodVersion: input.methodVersion ?? null,
+      ...(input.harnessVariantId ? { harnessVariantId: input.harnessVariantId } : {}),
       ...(mcpServerIds.length > 0 ? { mcpServerIds } : {}),
       ...(project ? { projectId: project.id } : {})
     };

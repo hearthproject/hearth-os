@@ -13,6 +13,7 @@ import {
   applyCounterfactualOverride,
   cassetteModel,
   cassetteTools,
+  createAgentState,
   createBuiltinTools,
   defaultTaskPermissions,
   deserializeAgentState,
@@ -20,12 +21,16 @@ import {
   modelRequestFingerprint,
   describeModelRequest,
   runAgent,
+  setPlan,
   sha256Hex,
   toolCatalogDigest,
   type AgentModel,
+  type AgentPlan,
+  type AgentToolState,
   type AgentTool,
   type AgentToolResult,
   type AgentModelTurn,
+  type AgentMessage,
   type CassetteMode,
   type CassetteTraceEntry,
   type CounterfactualOverride,
@@ -305,6 +310,47 @@ function recordedRequestAt(cassette: LoadedCassette, store: EvidenceStore, index
   return raw && typeof raw === "object" ? raw as ModelRequestDescriptor : null;
 }
 
+function recordedInitialMessages(cassette: LoadedCassette, store: EvidenceStore): AgentMessage[] | null {
+  const exchange = cassette.exchanges.find((item) => item.kind === "model.request");
+  if (!exchange) return null;
+  const raw = readContentBlob(store.blobRoot, exchange.input.ref);
+  if (!raw || typeof raw !== "object") return null;
+  const messages = (raw as ModelRequestDescriptor).messages;
+  return Array.isArray(messages) && messages.length > 0 ? (messages as AgentMessage[]) : null;
+}
+
+/** Runtime re-injects `<active_plan>` from state each turn; do not seed the rendered copy twice. */
+function withoutInjectedPlan(messages: AgentMessage[]): AgentMessage[] {
+  return messages.filter((message) => !(message.role === "user" && typeof message.content === "string"
+    && /^\s*<active_plan>[\s\S]*<\/active_plan>\s*$/.test(message.content)));
+}
+
+/**
+ * Replays of resumed runs start from a message list that already contains the
+ * rendered `<active_plan>` block. Rebuild that plan/todo state so later turns
+ * inject the same plan context as the original run.
+ */
+function restorePlanState(messages: AgentMessage[], workspaceRoot: string): AgentToolState | undefined {
+  const blocks = messages
+    .filter((message) => message.role === "user" && typeof message.content === "string")
+    .flatMap((message) => [...String(message.content).matchAll(/<active_plan>([\s\S]*?)<\/active_plan>/g)].map((match) => match[1]));
+  const block = blocks.at(-1)?.trim();
+  if (!block) return undefined;
+  const title = /^title:\s*(.+)$/m.exec(block)?.[1]?.trim() || "recorded-plan";
+  const goalSection = /^goal:\s*([\s\S]*?)^steps\s*\(/m.exec(block)?.[1]?.trim();
+  const goal = goalSection || title;
+  const steps: AgentPlan["steps"] = [];
+  for (const line of block.split(/\r?\n/)) {
+    const match = /^([a-zA-Z0-9_-]+)\.\s*\[(pending|in_progress|completed|cancelled)\]\s*(.+)$/.exec(line.trim());
+    if (!match) continue;
+    steps.push({ id: match[1]!, title: match[3]!.trim(), state: match[2] as AgentPlan["steps"][number]["state"] });
+  }
+  if (steps.length === 0) return undefined;
+  const state = createAgentState(workspaceRoot);
+  setPlan(state, { title, goal, steps, createdAt: Date.now() });
+  return state;
+}
+
 function preview(value: unknown, limit = 120): string {
   const text = typeof value === "string" ? value : canonicalJson(value ?? null);
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
@@ -434,6 +480,9 @@ export class ReplayService {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(1_000, Math.min(1_800_000, input.timeoutMs ?? 600_000)));
     const events: RuntimeEvent[] = [];
+    const initialMessages = recordedInitialMessages(cassette, this.store);
+    const seededMessages = initialMessages ? withoutInjectedPlan(initialMessages) : null;
+    const restoredState = initialMessages ? restorePlanState(initialMessages, workspace) : undefined;
     let result;
     try {
       result = await runAgent({
@@ -445,6 +494,9 @@ export class ReplayService {
         permissions,
         workspaceRoot: workspace,
         outDir,
+        ...(seededMessages
+          ? { resume: { messages: seededMessages, usage: { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 }, turns: 0, toolCalls: 0, ...(restoredState ? { state: restoredState } : {}) } }
+          : {}),
         signal: controller.signal,
         onEvent: (event) => events.push(event),
         requireFinishTool: false,

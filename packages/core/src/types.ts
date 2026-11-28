@@ -479,6 +479,8 @@ export interface TaskRecord {
   pinnedAt?: string | null;
   archivedAt?: string | null;
   budgetOverride?: RunBudget | null;
+  /** Task-level harness variant selected at creation; overrides the process default. */
+  harnessVariantId?: string | null;
   deletedAt?: string | null;
   trashBatchId?: string | null;
 }

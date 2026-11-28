@@ -375,6 +375,36 @@ export const api = {
     return (body as AttachmentUploadResult).attachments;
   },
   health: () => request<HealthResponse>("/api/health"),
+  evidenceTask: (taskId: string) => request<Record<string, unknown>>(`/api/evidence/tasks/${encodeURIComponent(taskId)}/evidence`),
+  evidenceGraph: (taskId: string) => request<Record<string, unknown>>(`/api/evidence/tasks/${encodeURIComponent(taskId)}/graph`),
+  evidenceProvenance: (taskId: string) => request<{
+    taskId: string;
+    graph: { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>>; artifacts?: Array<Record<string, unknown>> };
+    chains: Array<Record<string, unknown>>;
+  }>(`/api/evidence/tasks/${encodeURIComponent(taskId)}/provenance`),
+  evidenceManifest: (runId: string) => request<{ manifest: Record<string, unknown>; fingerprintValid: boolean }>(`/api/evidence/runs/${encodeURIComponent(runId)}/manifest`),
+  evidenceManifests: async (runIds: string[]) => Promise.all(runIds.map((runId) =>
+    request<{ manifest: Record<string, unknown>; fingerprintValid: boolean }>(`/api/evidence/runs/${encodeURIComponent(runId)}/manifest`)
+  )),
+  evidenceCompare: (left: string, right: string) => request<Record<string, unknown>>(`/api/evidence/compare?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`),
+  evidencePolicy: (taskId: string) => request<Record<string, unknown>>(`/api/evidence/policy/${encodeURIComponent(taskId)}`),
+  evidencePolicyActual: (taskId: string) => request<Record<string, unknown>>(`/api/evidence/policy/${encodeURIComponent(taskId)}/actual`),
+  evidencePreflight: (input: { taskId: string; actions: Array<Record<string, unknown>>; policy?: Record<string, unknown> }) =>
+    request<Record<string, unknown>>("/api/evidence/policy/preflight", { method: "POST", body: JSON.stringify(input) }),
+  evidenceCost: (taskId: string) => request<{
+    taskId: string;
+    statuses: Array<Record<string, unknown>>;
+    budgets: Array<Record<string, unknown>>;
+    entries: Array<Record<string, unknown>>;
+    degradations: Array<Record<string, unknown>>;
+  }>(`/api/cost/tasks/${encodeURIComponent(taskId)}`),
+  evidenceVariants: () => request<{ variants: Array<Record<string, unknown>> }>("/api/evidence/variants"),
+  evidenceVariantMetrics: () => request<Record<string, unknown>>("/api/evidence/variants/metrics"),
+  evidenceReplay: (input: { cassetteId: string; mode?: "strict_replay" | "live_on_divergence"; taskId?: string | null; timeoutMs?: number }) =>
+    request<Record<string, unknown>>("/api/replay/runs", { method: "POST", body: JSON.stringify(input) }),
+  evidenceReplayReports: (runId?: string) => request<{ reports: Array<Record<string, unknown>> }>(`/api/replay/reports${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`),
+  evidenceFork: (runId: string, input: { checkpointSeq?: number; label?: string; timeoutMs?: number } = {}) =>
+    request<Record<string, unknown>>(`/api/runs/${encodeURIComponent(runId)}/fork`, { method: "POST", body: JSON.stringify(input) }),
   onboarding: () => request<OnboardingSnapshot>("/api/onboarding"),
   completeOnboarding: (skipped = false) => request<OnboardingSnapshot>("/api/onboarding/complete", {
     method: "POST",

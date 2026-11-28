@@ -77,6 +77,18 @@ export interface PolicyPreflight {
   createdAt: string;
 }
 
+/**
+ * The enforcement view the scheduler consumes. `evaluation` is the declarative
+ * rule outcome; `allow`/`requireApproval` are what production will actually do.
+ */
+export interface PolicyEnforcement {
+  evaluation: PolicyEvaluation;
+  allow: boolean;
+  requireApproval: boolean;
+  enforcedBy: "rule" | "rule_deny" | "rule_ask" | "full_permission_allow" | "shadow" | "disabled";
+  reason: string;
+}
+
 const DEFAULT_POLICY: PolicySpec = {
   schemaVersion: 1,
   id: "default",
@@ -99,6 +111,25 @@ const DEFAULT_POLICY: PolicySpec = {
       match: { pathPatterns: ["**/.ssh/**", "**/.gnupg/**", "**/master.key", "**/*.pem"] },
       decision: "deny",
       reason: "secret_path_write_blocked"
+    },
+    {
+      id: "allow-local-read",
+      description: "读取本机与外部资料默认放行",
+      priority: 90,
+      match: { effects: ["read"] },
+      decision: "allow",
+      reason: "read_allowed"
+    },
+    {
+      id: "allow-local-work",
+      description: "工作区内的写入与普通命令默认放行",
+      priority: 30,
+      match: {
+        tools: ["write_file", "edit_file", "apply_patch", "write_spreadsheet", "write_document", "delete_file", "shell", "run_command", "exec", "todo_write", "todo_read"],
+        toolPatterns: ["browser_click", "browser_type", "browser_key", "browser_scroll", "browser_select", "browser_hover", "browser_wait", "browser_tabs", "desktop_*", "capture_screen"]
+      },
+      decision: "allow",
+      reason: "local_work_allowed"
     }
   ],
   approval: { mode: "ask", teamMode: false, recoveryPolicy: "manual", retryPolicy: "none" }

@@ -243,16 +243,18 @@ export interface DegradationDirective {
   contextScale: number;
   maxRetries: number | null;
   fallbackModel: string | null;
+  /** Upper bound for additional tool calls in this run; null means uncapped. */
+  maxToolCallsPerRun: number | null;
   stop: boolean;
   reason: string;
 }
 
 export const DEGRADATION_DIRECTIVES: Record<DegradationStep, DegradationDirective> = {
-  none: { step: "none", contextScale: 1, maxRetries: null, fallbackModel: null, stop: false, reason: "normal" },
-  context_shrink: { step: "context_shrink", contextScale: 0.6, maxRetries: null, fallbackModel: null, stop: false, reason: "budget_pressure" },
-  tool_call_reduce: { step: "tool_call_reduce", contextScale: 0.6, maxRetries: 0, fallbackModel: null, stop: false, reason: "budget_pressure" },
-  fallback_model: { step: "fallback_model", contextScale: 0.6, maxRetries: 0, fallbackModel: "fallback", stop: false, reason: "budget_pressure" },
-  stop: { step: "stop", contextScale: 0.6, maxRetries: 0, fallbackModel: "fallback", stop: true, reason: "budget_hard_stop" }
+  none: { step: "none", contextScale: 1, maxRetries: null, fallbackModel: null, maxToolCallsPerRun: null, stop: false, reason: "normal" },
+  context_shrink: { step: "context_shrink", contextScale: 0.6, maxRetries: null, fallbackModel: null, maxToolCallsPerRun: null, stop: false, reason: "budget_pressure" },
+  tool_call_reduce: { step: "tool_call_reduce", contextScale: 0.6, maxRetries: 0, fallbackModel: null, maxToolCallsPerRun: 24, stop: false, reason: "budget_pressure" },
+  fallback_model: { step: "fallback_model", contextScale: 0.5, maxRetries: 0, fallbackModel: "fallback", maxToolCallsPerRun: 16, stop: false, reason: "budget_pressure" },
+  stop: { step: "stop", contextScale: 0.5, maxRetries: 0, fallbackModel: "fallback", maxToolCallsPerRun: 0, stop: true, reason: "budget_hard_stop" }
 };
 
 export function nextStep(current: DegradationStep): DegradationStep {
@@ -263,23 +265,23 @@ export function nextStep(current: DegradationStep): DegradationStep {
 export class DegradationController {
   constructor(private readonly store: EvidenceStore) {}
 
-  private stateKey(runId: string): string {
-    return `degrade:${runId}`;
+  private stateKey(runId: string, scopeKey?: string): string {
+    return `degrade:${scopeKey ?? runId}`;
   }
 
-  current(runId: string): DegradationStep {
-    const state = this.store.getBudgetState(this.stateKey(runId));
+  current(runId: string, scopeKey?: string): DegradationStep {
+    const state = this.store.getBudgetState(this.stateKey(runId, scopeKey));
     const step = typeof state?.step === "string" ? state.step : "none";
     return (DEGRADATION_STEPS as readonly string[]).includes(step) ? step as DegradationStep : "none";
   }
 
-  directive(runId: string): DegradationDirective {
-    return DEGRADATION_DIRECTIVES[this.current(runId)];
+  directive(runId: string, scopeKey?: string): DegradationDirective {
+    return DEGRADATION_DIRECTIVES[this.current(runId, scopeKey)];
   }
 
   /** Escalate exactly one step; repeated calls are monotonic and audited. */
-  escalate(runId: string, reason: string, detail: Record<string, unknown> = {}): DegradationDirective {
-    const from = this.current(runId);
+  escalate(runId: string, reason: string, detail: Record<string, unknown> = {}, scopeKey?: string): DegradationDirective {
+    const from = this.current(runId, scopeKey);
     const to = nextStep(from);
     if (to === from) return DEGRADATION_DIRECTIVES[from];
     const at = new Date().toISOString();
@@ -293,14 +295,14 @@ export class DegradationController {
       detail,
       directive: DEGRADATION_DIRECTIVES[to]
     });
-    this.store.saveBudgetState(this.stateKey(runId), { step: to, reason, updatedAt: at }, at);
+    this.store.saveBudgetState(this.stateKey(runId, scopeKey), { step: to, reason, updatedAt: at }, at);
     return DEGRADATION_DIRECTIVES[to];
   }
 
   /** Recovery requires an explicit policy, never an implicit rescale. */
-  recover(runId: string, policy: "manual_reset" | "new_run" = "manual_reset"): DegradationDirective {
+  recover(runId: string, policy: "manual_reset" | "new_run" = "manual_reset", scopeKey?: string): DegradationDirective {
     const at = new Date().toISOString();
-    const from = this.current(runId);
+    const from = this.current(runId, scopeKey);
     if (from === "none") return DEGRADATION_DIRECTIVES.none;
     this.store.appendDegradation({
       id: `degrade:${runId}:recover:${at}`,
@@ -311,7 +313,7 @@ export class DegradationController {
       reason: "explicit_recovery",
       detail: { policy }
     });
-    this.store.saveBudgetState(this.stateKey(runId), { step: "none", reason: "explicit_recovery", updatedAt: at }, at);
+    this.store.saveBudgetState(this.stateKey(runId, scopeKey), { step: "none", reason: "explicit_recovery", updatedAt: at }, at);
     return DEGRADATION_DIRECTIVES.none;
   }
 
@@ -321,7 +323,7 @@ export class DegradationController {
 }
 
 /** Per-run degradation directive consumed by the scheduler. */
-export function degradationForRun(store: EvidenceStore, runId: string | null | undefined): DegradationDirective {
+export function degradationForRun(store: EvidenceStore, runId: string | null | undefined, scopeKey?: string): DegradationDirective {
   if (!runId) return DEGRADATION_DIRECTIVES.none;
-  return new DegradationController(store).directive(runId);
+  return new DegradationController(store).directive(runId, scopeKey);
 }
