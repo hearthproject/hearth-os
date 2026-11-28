@@ -203,3 +203,153 @@ hearth_context_compactions_by_experiment{experiment="default"} 1
 - 未设置 `HEARTH_COMPACTION_EXPERIMENT` 时，事件/指标归入 `default`。
 - 设置 `HEARTH_COMPACTION_EXPERIMENT=exp_v2` 并重启后，新 compaction 正确打上 `exp_v2`，`byExperiment` 和 Prometheus label 同时出现 `default=2, exp_v2=1`。
 - 历史 `default` 数据未被覆盖；指标来自事件聚合，重启后读取既有 DB 结果一致。
+
+## 阶段 B：异常与边界测试
+
+### B2a. Auto 触发统计（2026-11-28）
+
+#### 1) 源码检查
+
+- `ConversationContextService.compactIfNeeded` 接收 `trigger: "auto" | "manual" | "overflow"`；当 `trigger==="auto"` 且 `effectiveTokens <= threshold` 时直接返回 `null`；否则调用 `compact(...)`，`compact` 将 `trigger` 原样写入 compaction 记录和 `conversation.context.compacted` 事件 payload。
+  - `apps/server/src/conversation-context.ts:531-561`（compactIfNeeded，auto threshold gate）
+  - `apps/server/src/conversation-context.ts:588-692`（compact，running->completed，事件 payload `trigger`）
+- 运行时 auto 调用点：
+  - `renderForTask`：`compactIfNeeded(..., "auto", ...)`，`conversation-context.ts:470`
+  - `renderForChat`：`compactIfNeeded(..., "auto", ...)`，`conversation-context.ts:495`
+  - `refreshAfterTask`：`compactIfNeeded(..., "auto", ...)`，`conversation-context.ts:579`
+- 指标聚合：`context-metrics.ts:171-178` 按 `conversation_compactions.trigger` 统计 `byTrigger.auto/manual/overflow`；Prometheus 输出 `hearth_context_compactions_by_trigger{trigger="auto"}`，`context-metrics.ts:245-249`。
+
+#### 2) 脚本化触发
+
+在 `hearth-os/.tmp-metrics-test/trigger-auto.ts` 中直接使用 `HearthStore + ConversationContextService`（同 DB：`.tmp-metrics-test/.hearth/hearth.sqlite`），创建测试对话并写入 40 条消息，然后调用：
+
+```ts
+await conversationContext.compactIfNeeded(conversation.id, "auto", {
+  thresholdTokens: 1,
+  keepTokens: 2000,
+  summaryMaxTokens: 2000,
+  budgetTokens: 16000
+});
+```
+
+说明：传入 `thresholdTokens: 1` 是为了稳定满足 auto 路径的阈值条件，验证“auto 触发路径被执行并正确打标”；trigger 仍由 `compactIfNeeded` 传入 `"auto"`。
+
+脚本输出：
+
+```json
+{
+  "stage": "after",
+  "result": {
+    "id": "91c579de-8fe4-48d7-9747-3aead91c56bf",
+    "trigger": "auto",
+    "status": "completed",
+    "tokensBefore": 70700,
+    "tokensAfter": 3568
+  },
+  "event": {
+    "seq": 451,
+    "trigger": "auto",
+    "experiment": "default",
+    "config": {
+      "compactRatio": 0.8,
+      "keepTokens": 2000,
+      "summaryMaxTokens": 2000,
+      "budgetTokens": 16000,
+      "tokenEstimatorVersion": "cjk-v1"
+    }
+  }
+}
+```
+
+#### 3) 数据库核对
+
+- `conversation_compactions` 新增记录：`id=91c579de-8fe4-48d7-9747-3aead91c56bf, trigger=auto, status=completed, tokensBefore=70700, tokensAfter=3568`。
+- `events` 新增 `conversation.context.compacted`：`seq=451, payload.trigger="auto", payload.experiment="default", payload.config` 存在。
+
+#### 4) HTTP 验证
+
+`GET /api/context/metrics`（server 读取同一 DB）：
+
+- `compactions.total = 4`（此前 3）
+- `compactions.completed = 4`
+- `compactions.byTrigger = {"auto":1,"manual":3,"overflow":0}`
+- `byExperiment = {"default":3,"exp_v2":1}`
+
+#### 5) Prometheus 验证
+
+`GET /api/context/metrics/prometheus`：
+
+```text
+hearth_context_compactions_total 4
+hearth_context_compactions_by_status{status="completed"} 4
+hearth_context_compactions_by_trigger{trigger="auto"} 1
+hearth_context_compactions_by_trigger{trigger="manual"} 3
+hearth_context_compactions_by_trigger{trigger="overflow"} 0
+hearth_context_compactions_by_experiment{experiment="default"} 3
+hearth_context_compactions_by_experiment{experiment="exp_v2"} 1
+```
+
+#### 结论
+
+- **Pass**：auto 触发路径可执行，compaction 记录和 compacted 事件的 `trigger` 均为 `auto`；`/api/context/metrics` 的 `byTrigger.auto` 与 Prometheus `trigger="auto"` 计数正确增加。
+- **观察**：本次脚本进程未设置 `HEARTH_COMPACTION_EXPERIMENT`，因此事件 `experiment=default`；说明 experiment 标签取决于发出事件的进程环境变量。该行为与当前实现一致，但在多进程/脚本注入场景下需注意。
+
+### B2b. Overflow 触发统计（2026-11-28）
+
+#### 1) 源码检查
+
+- 类型与接口支持 `overflow`：`compactIfNeeded/compactNow/compact` 的 trigger 类型均包含 `"overflow"`（`conversation-context.ts:533,565,590`）。
+- 指标聚合支持 `overflow`：`context-metrics.ts:40,178,253` 统计并导出 `byTrigger.overflow` / `trigger="overflow"`。
+- **生产触发点检查**：`git grep '"overflow"' apps/server/src` 未发现运行时业务代码传入 `"overflow"`；仅见类型定义、指标聚合、测试/断言。说明当前仓库中 overflow **有类型与指标预留、compactNow 可接受该 trigger，但未发现自动产生 overflow trigger 的生产路径**。
+
+#### 2) 脚本化触发（Runtime 路径验证）
+
+使用 `compactNow(conversation.id, "overflow")` 走真实 compaction 运行时路径（非直接篡改 metrics 聚合结果）。脚本：`.tmp-metrics-test/trigger-overflow.ts`，同一测试 DB；脚本内设置 `process.env.HEARTH_COMPACTION_EXPERIMENT="exp_v2"` 与当前运行 server 环境一致。
+
+输出：
+
+```json
+{
+  "result": {
+    "id": "0a3f8095-1b9c-42bc-afcb-f931dceada69",
+    "trigger": "overflow",
+    "status": "completed",
+    "tokensBefore": 79540,
+    "tokensAfter": 4012
+  },
+  "event": {
+    "seq": 452,
+    "trigger": "overflow",
+    "experiment": "exp_v2"
+  }
+}
+```
+
+#### 3) 数据库核对
+
+- `conversation_compactions`：`id=0a3f8095-1b9c-42bc-afcb-f931dceada69, trigger=overflow, status=completed`。
+- `events`：`conversation.context.compacted` `seq=452`，`payload.trigger="overflow"`，`payload.experiment="exp_v2"`。
+
+#### 4) HTTP 验证
+
+`GET /api/context/metrics`：
+
+- `compactions.total = 5`
+- `compactions.byTrigger = {"auto":1,"manual":3,"overflow":1}`
+- `byExperiment = {"default":3,"exp_v2":2}`
+
+#### 5) Prometheus 验证
+
+```text
+hearth_context_compactions_total 5
+hearth_context_compactions_by_trigger{trigger="auto"} 1
+hearth_context_compactions_by_trigger{trigger="manual"} 3
+hearth_context_compactions_by_trigger{trigger="overflow"} 1
+hearth_context_compactions_by_experiment{experiment="default"} 3
+hearth_context_compactions_by_experiment{experiment="exp_v2"} 2
+```
+
+#### 结论
+
+- **Pass（聚合/标记链路）**：当 compaction 记录与事件的 trigger 为 `overflow` 时，DB、HTTP metrics、Prometheus 三处统计正确。
+- **Gap（生产触发）**：当前未发现生产代码自动产生 `overflow` compaction 的路径；`compactNow` 支持该 trigger，但实际“上下文溢出 -> overflow compaction”闭环仍需确认设计意图/补触发点。该项在路线中应标记为“指标链路已验证，生产触发待确认”。
