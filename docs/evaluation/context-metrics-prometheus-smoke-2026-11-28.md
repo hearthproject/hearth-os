@@ -353,3 +353,94 @@ hearth_context_compactions_by_experiment{experiment="exp_v2"} 2
 
 - **Pass（聚合/标记链路）**：当 compaction 记录与事件的 trigger 为 `overflow` 时，DB、HTTP metrics、Prometheus 三处统计正确。
 - **Gap（生产触发）**：当前未发现生产代码自动产生 `overflow` compaction 的路径；`compactNow` 支持该 trigger，但实际“上下文溢出 -> overflow compaction”闭环仍需确认设计意图/补触发点。该项在路线中应标记为“指标链路已验证，生产触发待确认”。
+
+### B1. Compaction 失败时指标是否正确（2026-11-28）
+
+#### 1) 源码检查
+
+- `conversation-context.ts:614-631`：compaction 先写入 `status="running"` 记录（含 `coveredMessageIds/tokensBefore/createdAt`）。
+- `conversation-context.ts:632-692`：成功时生成 summary、写 state、发布 `conversation.context.compacted` 事件、更新记录为 `completed`。
+- `conversation-context.ts:693-700`：失败时 catch 更新为 `status="failed"`，写 `error` 和 `completedAt`，**不发布 compacted 事件**。
+- 指标聚合 `context-metrics.ts`：`failed/completed/running` 来自 `conversation_compactions.status`；`averageTokensBefore` 对所有 compaction 行取平均；`averageTokensAfter/averageCompressionRatio` 只对 completed 且有效值取平均；`averageDurationMs` 对有 `created_at+completed_at` 的行取平均；`averageCoveredMessages` 对所有可解析 `covered_json` 的行取平均；`structuredRate/truncatedRate/byExperiment` 来自 `conversation.context.compacted` 事件。
+
+#### 2) 脚本化触发（运行时失败）
+
+脚本：`.tmp-metrics-test/trigger-failure.ts`。使用真实 `ConversationContextService.compactNow(...,"manual")`，`summaryGenerator` 主动抛错 `simulated compaction failure`；记录触发前后 `events` 最大 seq，检查是否有新 `conversation.context.compacted` 事件。
+
+输出：
+
+```json
+{
+  "beforeEventSeq": 452,
+  "afterEventSeq": 452,
+  "newCompactedEvents": [],
+  "result": {
+    "id": "b06ab7d9-fd17-4294-9d19-06e9d9680db6",
+    "trigger": "manual",
+    "status": "failed",
+    "tokensBefore": 77300,
+    "tokensAfter": null,
+    "error": "simulated compaction failure"
+  },
+  "dbRow": {
+    "id": "b06ab7d9-fd17-4294-9d19-06e9d9680db6",
+    "trigger": "manual",
+    "status": "failed",
+    "tokens_before": 77300,
+    "tokens_after": null,
+    "error": "simulated compaction failure",
+    "created_at": "2026-11-28T05:08:47.400Z",
+    "completed_at": "2026-11-28T05:08:47.402Z"
+  }
+}
+```
+
+#### 3) 数据库核对
+
+- `conversation_compactions` 新增失败记录：`status=failed, tokens_after=NULL, error="simulated compaction failure", completed_at` 已写入。
+- 事件表无新增 `conversation.context.compacted`（seq 仍为 452）。
+
+#### 4) HTTP 验证（基线 -> 失败后）
+
+基线（失败前）：`total=5, completed=5, failed=0, manual=3, avgTokensBefore=97401, avgTokensAfter=25179, avgCompressionRatio=0.2309782046926979, avgDurationMs=24134, avgCoveredMessages=30.8, structuredRate=1, truncatedRate=0, byExperiment={"default":3,"exp_v2":2}`
+
+失败后 `GET /api/context/metrics`：
+
+| 字段 | 失败后 | 预期 | 结果 |
+|---|---:|---|:---:|
+| total | 6 | +1 | Pass |
+| completed | 5 | 不变 | Pass |
+| failed | 1 | +1 | Pass |
+| running | 0 | 不变 | Pass |
+| byTrigger.manual | 4 | +1 | Pass |
+| averageTokensAfter | 25179 | 不变（仅 completed） | Pass |
+| averageCompressionRatio | 0.2309782046926979 | 不变（仅 completed） | Pass |
+| structuredRate | 1 | 不变（无事件） | Pass |
+| truncatedRate | 0 | 不变（无事件） | Pass |
+| byExperiment | default=3, exp_v2=2 | 不变（无事件） | Pass |
+| averageTokensBefore | 94050.83333333333 | 含失败行，变化符合代码 | Pass* |
+| averageDurationMs | 20112 | 含失败行(2ms)，变化符合代码 | Pass* |
+| averageCoveredMessages | 32 | 含失败行 covered_json，变化符合代码 | Pass* |
+
+\* 这三个平均值包含失败 compaction 行（代码按所有 compactionRows/有时间戳行/可解析 covered 行计算），不是 bug；但语义上会被快速失败或异常记录影响。写报告/告警时应区分“尝试均值”和“成功压缩均值”。
+
+#### 5) Prometheus 验证
+
+```text
+hearth_context_compactions_total 6
+hearth_context_compactions_by_status{status="completed"} 5
+hearth_context_compactions_by_status{status="failed"} 1
+hearth_context_compactions_by_status{status="running"} 0
+hearth_context_compactions_by_trigger{trigger="manual"} 4
+hearth_context_compactions_avg_tokens_after 25179
+hearth_context_compactions_avg_compression_ratio 0.2309782046926979
+hearth_context_compactions_structured_rate 1
+hearth_context_compactions_truncated_rate 0
+hearth_context_compactions_by_experiment{experiment="default"} 3
+hearth_context_compactions_by_experiment{experiment="exp_v2"} 2
+```
+
+#### 结论
+
+- **Pass**：失败 compaction 正确计入 `failed`，`completed` 不变；失败路径不发 `conversation.context.compacted` 事件，因此不会污染 `structuredRate/truncatedRate/byExperiment`；`avg_tokens_after` 和 `avg_compression_ratio` 仅基于 completed，未被失败记录污染。
+- **观察**：`avg_tokens_before/avg_duration_ms/avg_covered_messages` 当前包含失败记录，语义上是“所有 compaction 尝试”的均值。若要用于压缩质量评估，建议后续补充仅 completed 的口径或在文档中明确口径。
