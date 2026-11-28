@@ -444,3 +444,76 @@ hearth_context_compactions_by_experiment{experiment="exp_v2"} 2
 
 - **Pass**：失败 compaction 正确计入 `failed`，`completed` 不变；失败路径不发 `conversation.context.compacted` 事件，因此不会污染 `structuredRate/truncatedRate/byExperiment`；`avg_tokens_after` 和 `avg_compression_ratio` 仅基于 completed，未被失败记录污染。
 - **观察**：`avg_tokens_before/avg_duration_ms/avg_covered_messages` 当前包含失败记录，语义上是“所有 compaction 尝试”的均值。若要用于压缩质量评估，建议后续补充仅 completed 的口径或在文档中明确口径。
+
+### B3. Running 状态如何反映（2026-11-28）
+
+#### 1) 源码检查
+
+- `conversation-context.ts:614-631`：创建 compaction 记录时 `status="running"`，`completedAt=null`，立即 `appendConversationCompaction(record)` 写入 DB。
+- `conversation-context.ts:632-692`：成功后更新为 `completed`，写 `completedAt`。
+- `conversation-context.ts:693-700`：失败后更新为 `failed`，写 `error/completedAt`。
+- `context-metrics.ts:93,167-169,241-244`：按 `conversation_compactions.status` 统计 `running/completed/failed`，Prometheus 导出 `hearth_context_compactions_by_status{status="running"}`。
+
+#### 2) 脚本化触发（中途快照）
+
+脚本：`.tmp-metrics-test/trigger-running.ts`。真实 `ConversationContextService.compactNow`，但 `summaryGenerator` 等待一个手动 gate Promise；在 gate 释放前等待 500ms，查询 HTTP metrics/Prometheus 和 DB 行；然后释放 gate，等待 compaction 完成，再次查询。
+
+关键输出：
+
+```json
+{
+  "before": { "total": 6, "completed": 5, "failed": 1, "running": 0 },
+  "during": { "total": 7, "completed": 5, "failed": 1, "running": 1 },
+  "dbDuring": {
+    "id": "d28344c1-f952-46d2-89b0-ada199fc3b28",
+    "status": "running",
+    "trigger": "manual",
+    "completed_at": null,
+    "error": null
+  },
+  "result": { "id": "d28344c1-f952-46d2-89b0-ada199fc3b28", "status": "completed", "trigger": "manual" },
+  "after": { "total": 7, "completed": 6, "failed": 1, "running": 0 },
+  "dbAfter": {
+    "id": "d28344c1-f952-46d2-89b0-ada199fc3b28",
+    "status": "completed",
+    "trigger": "manual",
+    "completed_at": "2026-11-28T05:12:27.382Z",
+    "error": null
+  }
+}
+```
+
+#### 3) DB 核对
+
+- 进行中：同一条 compaction 记录 `status=running, completed_at=null, error=null`。
+- 完成后：同一条记录变为 `status=completed, completed_at` 有值，`error=null`。
+
+#### 4) HTTP 验证
+
+- 压缩进行中：`total=7, completed=5, failed=1, running=1`。
+- 压缩完成后：`total=7, completed=6, failed=1, running=0`。
+
+#### 5) Prometheus 验证
+
+进行中：
+
+```text
+hearth_context_compactions_total 7
+hearth_context_compactions_by_status{status="completed"} 5
+hearth_context_compactions_by_status{status="failed"} 1
+hearth_context_compactions_by_status{status="running"} 1
+```
+
+完成后：
+
+```text
+hearth_context_compactions_total 7
+hearth_context_compactions_by_status{status="completed"} 6
+hearth_context_compactions_by_status{status="failed"} 1
+hearth_context_compactions_by_status{status="running"} 0
+```
+
+#### 结论
+
+- **Pass**：running 状态会真实写入 DB，并能通过 `/api/context/metrics` 和 Prometheus `by_status{status="running"}` 观测到；完成后正确转为 `completed`，`running` 回落。
+- **观察**：`POST /api/conversations/:id/context/compact` 是同步等待 compactNow 完成的接口，普通调用方通常看不到 running；running 更适合通过 metrics 轮询、并发压缩、或后台触发场景观测。告警/面板应把 running 视为瞬时态信号，而不是假设它长期为 0。
