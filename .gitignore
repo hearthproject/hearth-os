@@ -19,6 +19,7 @@ work/screenshots/
 
 # Hearth runtime data
 .hearth/
+.tmp-metrics-test/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
