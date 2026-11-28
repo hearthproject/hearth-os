@@ -517,3 +517,58 @@ hearth_context_compactions_by_status{status="running"} 0
 
 - **Pass**：running 状态会真实写入 DB，并能通过 `/api/context/metrics` 和 Prometheus `by_status{status="running"}` 观测到；完成后正确转为 `completed`，`running` 回落。
 - **观察**：`POST /api/conversations/:id/context/compact` 是同步等待 compactNow 完成的接口，普通调用方通常看不到 running；running 更适合通过 metrics 轮询、并发压缩、或后台触发场景观测。告警/面板应把 running 视为瞬时态信号，而不是假设它长期为 0。
+
+### B5. 极端值及异常事件处理（2026-11-28）
+
+#### 1) 源码检查（预期行为）
+
+- `context-metrics.ts:123-136`：事件 payload `JSON.parse` 失败则 `catch continue` 跳过；`structured` 用 `payload.structured !== false`，缺失字段会被计为 structured；`truncated` 仅 `=== true` 计数；`experiment` 为空/空白/缺失归 `default`。
+- `context-metrics.ts:95-115`：`compressionRatio` 仅在 `before>0 && tokensAfter` 有限时计入；`covered_json` 解析失败或非数组返回 null 并被过滤；duration 仅在时间可解析且 `>=0` 时计入。
+- `context-metrics.ts:175-181`：`averageTokensBefore` 对所有 compaction 行的有限数值取平均；`averageTokensAfter` 只取 completed 且有限值；completed/failed/running 来自 status 计数。
+- `context-metrics.ts:192-206`：Prometheus `promLine` 对 `null/!Number.isFinite` 样本直接跳过，不输出非法样本。
+
+#### 2) 注入与验证方法
+
+脚本：`.tmp-metrics-test/extreme-values.ts`。先取 baseline，通过 node:sqlite 直接向测试 DB 注入 5 条异常 `conversation_compactions` 行和 6 条异常 `conversation.context.compacted` 事件；查询 HTTP metrics/Prometheus；最后按 ID 清理注入数据并再次查询确认恢复。
+
+注入用例：
+
+| 用例 | 注入数据 | 观察结果 |
+|---|---|---|
+| malformed event payload | `payload_json="{bad json"` | 被跳过，metrics 未崩溃 |
+| structured 缺失 | `{"trigger":"manual","truncated":false}` | 计入 structured（`!== false` 语义） |
+| truncated 非 bool | `{"structured":true,"truncated":"yes"}` | 不计入 truncated（仅 `=== true`） |
+| experiment 空字符串 | `{"experiment":""}` | 归入 `default` |
+| experiment 空白 | `{"experiment":"  "}` | 归入 `default` |
+| experiment 特殊字符 | `{"experiment":"exp/v2:canary \"test\""}` | JSON/Prom 正常，Prom label 正确转义 |
+| tokensBefore=0, tokensAfter=100 | completed 行 | 不计入 compressionRatio（`before>0`） |
+| tokensAfter=null | completed 行 | 不计入 avgTokensAfter/compressionRatio |
+| covered_json 非法 | `"{not-json"` | covered 平均值忽略该行 |
+| created_at/completed_at 不可解析 | `"not-a-date"/"also-bad"` | duration 平均值忽略该行 |
+| 极大值 | `tokensBefore=999999999, tokensAfter=888888888` | JSON/Prom 正常输出，无 NaN/Infinity |
+
+#### 3) DB/HTTP/Prometheus 核对
+
+Baseline：`total=7, completed=6, failed=1, structuredRate=1, truncatedRate=0, byExperiment={default:3,exp_v2:3}`
+
+注入后：`total=12, completed=11, failed=1, structuredRate=1, truncatedRate=0, byExperiment={default:7,exp_v2:3,"exp/v2:canary \"test\"":1}`
+
+- 6 条事件中 1 条 malformed 被跳过，5 条被计数；5 条都满足 `structured !== false`，0 条 `truncated===true`，因此 rate 不变。符合代码语义。
+- experiment：空字符串/空白/缺失都归 `default`（+4），特殊字符标签独立计数（+1）。
+- compaction 异常行未导致 endpoint 500；Prometheus `content-type=text/plain; version=0.0.4; charset=utf-8`，`promHasNaN=false, promHasInfinity=false`。
+- Prometheus 特殊标签正确转义：`hearth_context_compactions_by_experiment{experiment="exp/v2:canary \"test\""} 1`。
+
+清理注入数据后再次查询：metrics 完全恢复到 baseline。
+
+#### 4) 结论
+
+- **Pass**：异常事件/行不会导致 metrics 或 Prometheus endpoint 崩溃；malformed payload 被跳过；`null/NaN/Infinity` 未出现在 Prometheus 输出。
+- **Pass**：label 转义正确，特殊字符 experiment 可安全导出。
+- **语义观察（需注意）**：
+  - `structured` 缺失按 `!== false` 计为 structured，缺字段会抬高 structuredRate；这符合当前代码，但不一定符合“缺失=未知”的产品语义。
+  - 极大但有限的数值会显著拉偏平均值（本次注入后 avgTokensBefore/After 跃升到 8e7 量级），Prometheus 仍如实导出；建议后续考虑上限保护或分位数指标。
+  - `averageTokensBefore/Duration/CoveredMessages` 包含失败/异常 completed 行的口径在 B1 已观察到，本次再次确认。
+
+#### 5) 清理
+
+注入的 `extreme-comp-*`、`extreme-evt-*` 测试数据已在脚本末尾删除，并通过 `afterCleanup` 查询确认指标恢复 baseline。测试脚本保留在 `.tmp-metrics-test/`（已被 gitignore）。
